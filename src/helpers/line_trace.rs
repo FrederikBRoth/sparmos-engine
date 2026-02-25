@@ -1,6 +1,6 @@
 use cgmath::{InnerSpace, Point3, Vector2, Vector3};
 
-use crate::entity::entity::RenderableController;
+use crate::entity::entity::{PrimitiveVertex, RenderMeshInformation, RenderableController};
 use crate::helpers::animation::{AnimationHandler, AnimationType};
 
 const STEPSIZE: f32 = 0.1;
@@ -116,12 +116,12 @@ fn aabb_intersect(
     bounding_min: &cgmath::Vector3<f32>,
     bounding_max: &cgmath::Vector3<f32>,
 ) -> bool {
-    return point.x >= bounding_min.x
+    point.x >= bounding_min.x
         && point.x <= bounding_max.x
         && point.y >= bounding_min.y
         && point.y <= bounding_max.y
         && point.z >= bounding_min.z
-        && point.z <= bounding_max.z;
+        && point.z <= bounding_max.z
 }
 pub fn line_trace(
     state: &mut RenderableController,
@@ -142,11 +142,11 @@ pub fn line_trace(
             let max = instance.position + instance.size;
             let min = instance.position;
 
-            if let Some(distance) = ray_aabb_intersect(origin, direction, min, max) {
-                if distance < closest_distance {
-                    closest_distance = distance;
-                    closest_hit_index = Some(i);
-                }
+            if let Some(distance) = ray_aabb_intersect(origin, direction, min, max)
+                && distance < closest_distance
+            {
+                closest_distance = distance;
+                closest_hit_index = Some(i);
             }
         }
     }
@@ -155,8 +155,10 @@ pub fn line_trace(
 }
 
 pub fn line_trace_square(
-    state: &RenderableController,
+    state: &Vec<PrimitiveVertex>,
+    bounds: Vector2<u32>,
     click_vector: (Point3<f32>, Vector3<f32>),
+    filter: Option<Vec<usize>>,
 ) -> Option<usize> {
     let origin = click_vector.0;
     //Notice negation of vector
@@ -165,40 +167,54 @@ pub fn line_trace_square(
     let mut closest_t = f32::INFINITY;
     let mut hit_square = None;
 
-    for (i, mesh) in state.render_mesh_information.iter().enumerate() {
-        if let Some(instance) = mesh.instance_controller.instances.first() {
-            if !instance.should_render {
+    let start = bounds.x as usize;
+    let end = bounds.y as usize;
+
+    // optional filter — could be used to skip certain quads
+    if let Some(filter) = &filter {
+        for &quad_idx in filter {
+            // each quad is 4 vertices
+            let base = start + quad_idx * 4;
+            if base + 3 >= end {
+                // out of range, skip or handle error
                 continue;
             }
 
-            let positions: [Vector3<f32>; 4] = mesh.vertices[0..4]
-                .iter()
-                .map(|v| Vector3::new(v.position[0], v.position[1], v.position[2]) * instance.scale)
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
-
-            let normals: [Vector3<f32>; 4] = mesh.vertices[0..4]
-                .iter()
-                .map(|v| Vector3::new(v.normal[0], v.normal[1], v.normal[2]).normalize())
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
+            let vert0 = &state[base];
+            let vert1 = &state[base + 1];
+            let vert2 = &state[base + 2];
+            let vert3 = &state[base + 3];
 
             let origin = Vector3::new(origin.x, origin.y, origin.z);
-
+            let scale = 25.0;
             for (verts, norms) in [
                 (
-                    (positions[0], positions[1], positions[2]),
-                    (normals[0], normals[1], normals[2]),
+                    (
+                        Vector3::from(vert0.position) * scale,
+                        Vector3::from(vert1.position) * scale,
+                        Vector3::from(vert2.position) * scale,
+                    ),
+                    (
+                        vert0.normal.into(),
+                        vert1.normal.into(),
+                        vert2.normal.into(),
+                    ),
                 ),
                 (
-                    (positions[0], positions[2], positions[3]),
-                    (normals[0], normals[2], normals[3]),
+                    (
+                        Vector3::from(vert0.position) * scale,
+                        Vector3::from(vert2.position) * scale,
+                        Vector3::from(vert3.position) * scale,
+                    ),
+                    (
+                        vert0.normal.into(),
+                        vert2.normal.into(),
+                        vert3.normal.into(),
+                    ),
                 ),
             ] {
                 let (v0, v1, v2) = verts;
-                let (n0, n1, n2) = norms;
+                let (n0, n1, n2): (Vector3<f32>, Vector3<f32>, Vector3<f32>) = norms;
 
                 let avg_normal = (n0 + n1 + n2) / 3.0;
 
@@ -209,10 +225,65 @@ pub fn line_trace_square(
 
                     if t < closest_t {
                         closest_t = t;
-                        hit_square = Some(i);
+                        hit_square = Some(quad_idx);
                     }
                 }
             }
+            // do something with these 4 vertices
+        }
+    } else {
+        // no filter, iterate all quads
+        for (index, quad) in state[start..end].chunks_exact(4).enumerate() {
+            let vert0 = &quad[0];
+            let vert1 = &quad[1];
+            let vert2 = &quad[2];
+            let vert3 = &quad[3];
+
+            let origin = Vector3::new(origin.x, origin.y, origin.z);
+            let scale = 25.0;
+            for (verts, norms) in [
+                (
+                    (
+                        Vector3::from(vert0.position) * scale,
+                        Vector3::from(vert1.position) * scale,
+                        Vector3::from(vert2.position) * scale,
+                    ),
+                    (
+                        vert0.normal.into(),
+                        vert1.normal.into(),
+                        vert2.normal.into(),
+                    ),
+                ),
+                (
+                    (
+                        Vector3::from(vert0.position) * scale,
+                        Vector3::from(vert2.position) * scale,
+                        Vector3::from(vert3.position) * scale,
+                    ),
+                    (
+                        vert0.normal.into(),
+                        vert2.normal.into(),
+                        vert3.normal.into(),
+                    ),
+                ),
+            ] {
+                let (v0, v1, v2) = verts;
+                let (n0, n1, n2): (Vector3<f32>, Vector3<f32>, Vector3<f32>) = norms;
+
+                let avg_normal = (n0 + n1 + n2) / 3.0;
+
+                if let Some((t, _)) = ray_intersects_triangle(origin, direction, v0, v1, v2) {
+                    if avg_normal.dot(direction) > 0.0 {
+                        continue; // backface
+                    }
+
+                    if t < closest_t {
+                        closest_t = t;
+                        hit_square = Some(index);
+                    }
+                }
+            }
+            // do something with these
         }
     }
 

@@ -39,7 +39,7 @@ pub fn get_height_color(height: f32) -> Vector3<f32> {
     //low color rgb(204, 0, 153)
     //#db2777
 
-    let low_color = Vector3::new(0.852, 0.067, 0.318);
+    let low_color = Vector3::new(0.852, 0.067, 0.319);
     let high_color = Vector3::new(0.953, 0.406, 0.674);
     low_color + (high_color - low_color) * height
 }
@@ -64,11 +64,11 @@ pub struct EaseInEaseOut;
 impl EaseInEaseOut {
     pub fn ease_in_ease_out_cubic(number: f32) -> f32 {
         let number = number.clamp(0.0, 1.0);
-        return if number < 0.5 {
+        if number < 0.5 {
             4.0 * number * number * number
         } else {
             1.0 - pow(-2.0 * number + 2.0, 3) / 2.0
-        };
+        }
     }
 }
 #[derive(Copy, Clone)]
@@ -272,7 +272,7 @@ impl AnimationHandler {
         }
     }
 
-    pub fn reset_instance_position_to_current_position(&mut self, instances: &mut Vec<Instance>) {
+    pub fn reset_instance_position_to_current_position(&mut self, instances: &mut [Instance]) {
         for (i, animation) in self.movement_list.iter_mut().enumerate() {
             if let Some(instance) = instances.get_mut(i) {
                 if animation.animations.is_empty() {
@@ -310,7 +310,7 @@ impl AnimationHandler {
             animation.time += dt;
 
             let delay = (animation.current_pos.x + animation.current_pos.z) * 0.05;
-            let mut total_movement = animation.start.clone();
+            let mut total_movement = animation.start;
             for persistent in animation.persistent_animation.iter_mut() {
                 persistent.time += delta;
                 total_movement += persistent.animation_transition.lerp(
@@ -320,7 +320,7 @@ impl AnimationHandler {
                     delay,
                 ) - animation.start;
             }
-            let lerp = 1.0 * ease_in_ease_out_loop(animation.time, delay as f32, 1.0);
+            let lerp = 1.0 * ease_in_ease_out_loop(animation.time, delay, 1.0);
             if animation.animate_color {
                 animation.color = get_height_color(lerp);
             }
@@ -338,26 +338,24 @@ impl AnimationHandler {
                     step.time = 1.0;
                     instant_movement = (animation.start + step.movement_vector) - animation.start;
                     instant_animation = true;
+                } else if step.reversed {
+                    step.time -= delta * step.speed;
+                    step.time = step.time.clamp(0.0, 1.0);
+                    step_movement -= step.animation_transition.lerp(
+                        animation.start + step.movement_vector,
+                        animation.start,
+                        step.time,
+                        0.0,
+                    ) - (animation.start + step.movement_vector);
                 } else {
-                    if step.reversed {
-                        step.time -= delta * step.speed;
-                        step.time = step.time.clamp(0.0, 1.0);
-                        step_movement -= step.animation_transition.lerp(
-                            animation.start + step.movement_vector,
-                            animation.start,
-                            step.time,
-                            0.0,
-                        ) - (animation.start + step.movement_vector);
-                    } else {
-                        step.time += delta * step.speed;
-                        step.time = step.time.clamp(0.0, 1.0);
-                        step_movement += step.animation_transition.lerp(
-                            animation.start,
-                            animation.start + step.movement_vector,
-                            step.time,
-                            0.0,
-                        ) - animation.start;
-                    };
+                    step.time += delta * step.speed;
+                    step.time = step.time.clamp(0.0, 1.0);
+                    step_movement += step.animation_transition.lerp(
+                        animation.start,
+                        animation.start + step.movement_vector,
+                        step.time,
+                        0.0,
+                    ) - animation.start;
                 }
 
                 if step.time == 0.0 || step.time == 1.0 {
@@ -365,7 +363,7 @@ impl AnimationHandler {
                 }
 
                 if step.is_static && step.time == 1.0 && !step.instant {
-                    animation.start = animation.start + step_movement;
+                    animation.start += step_movement;
                     animation.grid_pos = animation.start + step_movement;
                 }
                 step_delta += step_movement;

@@ -1,5 +1,3 @@
-use image::hooks;
-use log::warn;
 use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
@@ -8,10 +6,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::{
-    core::state::{GameLoop, State},
-    prelude::run_game,
-};
+use crate::core::state::{GameLoop, State};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -41,6 +36,7 @@ where
     G: AppLifecycle<U, L>,
     L: 'static + GameLoop,
 {
+    pub is_focused: bool,
     pub hooks: G,
     pub game_loop: Option<L>,
     #[cfg(target_arch = "wasm32")]
@@ -64,6 +60,7 @@ where
         #[cfg(target_arch = "wasm32")]
         let proxy = Some(event_loop.create_proxy());
         Self {
+            is_focused: true,
             state: None,
             hooks: game,
             game_loop,
@@ -119,9 +116,17 @@ where
                 let proxy_clone = proxy.clone();
                 if let Some(mut game_loop) = self.game_loop.take() {
                     wasm_bindgen_futures::spawn_local(async move {
-                        let mut state = State::<L>::new(window).await;
+                        let mut state = State::<L>::new(window.clone()).await;
                         game_loop.setup(&mut state);
                         state.set_loop(game_loop);
+
+                        let size = state.window().inner_size();
+                        if size.width > 0 && size.height > 0 {
+                            state.resize(size);
+                        }
+
+                        state.window().request_redraw();
+
                         assert!(
                             proxy_clone
                                 .send_event(UserEvent::EngineEvent(EngineEvent::StateReady(state)))
@@ -165,34 +170,51 @@ where
             Some(canvas) => canvas,
             None => return,
         };
-        state.input(&event);
-        match event {
-            WindowEvent::CloseRequested => {
-                println!("The close button was pressed; stopping");
-                event_loop.exit();
-            }
-            WindowEvent::RedrawRequested => {
-                let dt = self.last_time.elapsed();
-                self.last_time = web_time::Instant::now();
-                state.update(dt);
+        if let WindowEvent::Focused(focused) = event {
+            println!("Focused: {}", focused);
+            self.is_focused = focused;
+            if focused {
                 state.render().unwrap();
+                self.last_time = web_time::Instant::now();
             }
-            WindowEvent::Resized(size) => {
-                // Reconfigures the size of the surface. We do not re-render
-                // here as this event is always followed up by redraw request.
-                state.resize(size);
+            // Do something when focused
+        }
+        if self.is_focused {
+            #[cfg(feature = "gui")]
+            if !state
+                .egui_renderer
+                .handle_input(state.window.as_ref(), &event)
+            {
+                state.input(&event);
             }
-            _ => (),
+            match event {
+                WindowEvent::CloseRequested => {
+                    println!("The close button was pressed; stopping");
+                    event_loop.exit();
+                }
+                WindowEvent::RedrawRequested => {
+                    let dt = self.last_time.elapsed();
+                    self.last_time = web_time::Instant::now();
+                    state.update(dt);
+                    state.render().unwrap();
+                }
+                WindowEvent::Resized(size) => {
+                    // Reconfigures the size of the surface. We do not re-render
+                    // here as this event is always followed up by redraw request.
+                    state.resize(size);
+                }
+                _ => (),
+            }
         }
     }
 
-    fn device_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        device_id: DeviceId,
-        event: DeviceEvent,
-    ) {
-        self.hooks
-            .on_device_event(event, self.state.as_mut().unwrap());
-    }
+    // fn device_event(
+    //     &mut self,
+    //     event_loop: &ActiveEventLoop,
+    //     device_id: DeviceId,
+    //     event: DeviceEvent,
+    // ) {
+    //     self.hooks
+    //         .on_device_event(event, self.state.as_mut().unwrap());
+    // }
 }

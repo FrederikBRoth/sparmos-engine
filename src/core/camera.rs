@@ -159,24 +159,29 @@ pub struct CameraController {
     pub is_backward_pressed: bool,
     pub is_left_pressed: bool,
     pub is_right_pressed: bool,
+    pub is_tilt_up_pressed: bool,
+    pub is_tilt_down_pressed: bool,
+    pub is_turn_left_pressed: bool,
+    pub is_turn_right_pressed: bool,
 }
 
 impl CameraController {
     pub fn new(
         speed: f32,
+        sensitivity: f32,
         screen_size: PhysicalSize<u32>,
         device: &Device,
         queue: Arc<wgpu::Queue>,
     ) -> Self {
-        let eye = Point3::new(-120.0, 90.0, -120.0);
+        let eye = Point3::new(140.0, -17.0, -382.0);
         let target = Point3::new(20.0, 25.0, 20.0);
 
-        let camera = Camera {
+        let mut camera = Camera {
             eye,
             target,
             up: cgmath::Vector3::unit_y(),
             forward: Vector3::unit_z(),
-            yaw: 1.0,
+            yaw: 111.0,
             pitch: 1.0,
             aspect: screen_size.width as f32 / screen_size.height as f32,
             fovy: 25.0,
@@ -191,9 +196,10 @@ impl CameraController {
                 end_target: target,
                 aspect_ratio_limit: 0.8,
                 height_modifier: 0.0,
-                speed: 1.0,
+                speed: 100.0,
             },
         };
+        camera.update_forward();
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
@@ -232,7 +238,7 @@ impl CameraController {
             queue,
             auto: false,
             speed,
-            sensitivity: 0.1,
+            sensitivity,
             camera,
             camera_uniform,
             camera_bind_group,
@@ -244,6 +250,10 @@ impl CameraController {
             is_backward_pressed: false,
             is_left_pressed: false,
             is_right_pressed: false,
+            is_tilt_up_pressed: false,
+            is_tilt_down_pressed: false,
+            is_turn_left_pressed: false,
+            is_turn_right_pressed: false,
         }
     }
 
@@ -269,21 +279,44 @@ impl CameraController {
                         self.is_down_pressed = is_pressed;
                         true
                     }
-                    KeyCode::KeyW | KeyCode::ArrowUp => {
+                    KeyCode::KeyW => {
                         self.is_forward_pressed = is_pressed;
                         true
                     }
-                    KeyCode::KeyA | KeyCode::ArrowLeft => {
+                    KeyCode::KeyA => {
                         self.is_left_pressed = is_pressed;
 
                         true
                     }
-                    KeyCode::KeyS | KeyCode::ArrowDown => {
+                    KeyCode::KeyS => {
                         self.is_backward_pressed = is_pressed;
                         true
                     }
-                    KeyCode::KeyD | KeyCode::ArrowRight => {
+                    KeyCode::KeyD => {
                         self.is_right_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ArrowUp => {
+                        self.is_tilt_up_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ArrowDown => {
+                        self.is_tilt_down_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ArrowLeft => {
+                        self.is_turn_left_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ArrowRight => {
+                        self.is_turn_right_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::Insert => {
+                        println!(
+                            "Position: {:?}, Yaw: {:?}, Pitch {:?}",
+                            self.camera.eye, self.camera.yaw, self.camera.pitch
+                        );
                         true
                     }
                     _ => false,
@@ -300,7 +333,7 @@ impl CameraController {
         self.camera.update_forward();
     }
 
-    pub fn update_camera(&mut self) {
+    pub fn update_camera(&mut self, dt: std::time::Duration) {
         // let forward = self.camera.target - self.camera.eye;
         // let forward_norm = forward.normalize();
         // let forward_mag = forward.magnitude();
@@ -340,23 +373,40 @@ impl CameraController {
         let right: Vector3<f32> = self.camera.forward.cross(self.camera.up).normalize();
 
         if self.is_forward_pressed {
-            self.camera.eye += self.camera.forward * self.speed;
+            self.camera.eye += self.camera.forward * self.speed * dt.as_secs_f32();
         }
         if self.is_backward_pressed {
-            self.camera.eye -= self.camera.forward * self.speed;
+            self.camera.eye -= self.camera.forward * self.speed * dt.as_secs_f32();
         }
         if self.is_right_pressed {
-            self.camera.eye += right * self.speed;
+            self.camera.eye += right * self.speed * dt.as_secs_f32();
         }
         if self.is_left_pressed {
-            self.camera.eye -= right * self.speed;
+            self.camera.eye -= right * self.speed * dt.as_secs_f32();
         }
         if self.is_up_pressed {
-            self.camera.eye += self.camera.up * self.speed;
+            self.camera.eye += self.camera.up * self.speed * dt.as_secs_f32();
         }
         if self.is_down_pressed {
-            self.camera.eye -= self.camera.up * self.speed;
+            self.camera.eye -= self.camera.up * self.speed * dt.as_secs_f32();
         }
+        if self.is_tilt_up_pressed {
+            self.camera.pitch -= self.sensitivity * dt.as_secs_f32();
+            self.camera.update_forward();
+        }
+        if self.is_tilt_down_pressed {
+            self.camera.pitch += self.sensitivity * dt.as_secs_f32();
+            self.camera.update_forward();
+        }
+        if self.is_turn_left_pressed {
+            self.camera.yaw -= self.sensitivity * dt.as_secs_f32();
+            self.camera.update_forward();
+        }
+        if self.is_turn_right_pressed {
+            self.camera.yaw += self.sensitivity * dt.as_secs_f32();
+            self.camera.update_forward();
+        }
+
         // if self.is_right_pressed {
         //     // Rescale the distance between the target and eye so
         //     // that it doesn't change. The eye therefore still

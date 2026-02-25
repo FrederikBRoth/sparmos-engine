@@ -1,39 +1,43 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::{iter, vec};
 
 use cgmath::{Vector3, prelude::*};
-use wgpu::{ShaderModel, ShaderModule, SurfaceConfiguration};
+use egui_wgpu::ScreenDescriptor;
+use wgpu::{Backend, ShaderModel, ShaderModule, SurfaceConfiguration};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
 use crate::core::camera::CameraController;
+use crate::core::gui::EguiRenderer;
 use crate::entity::entity::{
-    BufferManager, Instance, InstanceController, Light, PrimitiveMesh, RenderMeshInformation,
-    RenderableController, Rendering, instance_cube,
+    Instance, InstanceController, InstanceRaw, InstanceStorage, Light, MeshBufferManager,
+    PrimitiveMesh, RenderMeshInformation, RenderableController, Rendering, instance_cube,
 };
 use crate::entity::texture::Texture;
 
-// The main application state holding all GPU resources and game logic
+pub enum DeviceBackend {
+    WebGL,
+    WebGPU,
+}
 pub struct State<L>
 where
     L: GameLoop,
 {
-    pub surface: wgpu::Surface<'static>,     // GPU rendering surface
-    pub surface_configured: bool,            // Tracks if surface is configured
-    pub render_context: RenderContext,       // Surface configuration settings
-    pub size: winit::dpi::PhysicalSize<u32>, // Window size
-    #[allow(dead_code)]
-    // Handles input-based camera movement
-    // Bind group for camera
+    pub surface: wgpu::Surface<'static>,
+    pub surface_configured: bool,
+    pub render_context: RenderContext,
+    pub size: winit::dpi::PhysicalSize<u32>,
+
     #[allow(dead_code)]
     pub window: Arc<Window>, // Application window
     pub game_loop: Option<L>,
     pub scroll_y: i64,
     pub depth_texture: Texture,
+    pub egui_renderer: EguiRenderer,
+    pub backend: DeviceBackend,
 }
 pub trait GameLoop {
     fn render(
@@ -41,6 +45,7 @@ pub trait GameLoop {
         render: &mut wgpu::RenderPass,
         texture_view: &wgpu::TextureView,
         depth_texture: Texture,
+        backend: &DeviceBackend,
     );
 
     fn update(&mut self, dt: std::time::Duration, rc: &RenderContext);
@@ -50,6 +55,9 @@ pub trait GameLoop {
     fn resize(&mut self, config: &SurfaceConfiguration);
 
     fn setup<S: GameLoop>(&mut self, state: &mut State<S>);
+
+    #[cfg(feature = "gui")]
+    fn gui_setup(&mut self, egui_renderer: &EguiRenderer, render_context: &RenderContext);
 }
 
 impl<L> State<L>
@@ -65,25 +73,56 @@ where
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
             #[cfg(target_arch = "wasm32")]
-            backends: wgpu::Backends::GL,
+            backends: wgpu::Backends::BROWSER_WEBGPU,
             ..Default::default()
         });
 
         // Create surface linked to window
-        let surface = instance.create_surface(window.clone()).unwrap();
 
         // Select appropriate GPU adapter
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
+                compatible_surface: None,
                 force_fallback_adapter: false,
             })
-            .await
-            .unwrap();
+            .await;
 
-        log::warn!("{:?}", adapter.get_info());
+        log::warn!("{:?}", adapter.clone().unwrap().get_info());
 
+        let adapter = Err("Something");
+        let (surface, adapter, backend) = match adapter {
+            Ok(a) => {
+                let surface = instance.create_surface(window.clone()).unwrap();
+
+                (surface, a, DeviceBackend::WebGPU)
+            }
+            Err(_) => {
+                log::warn!("WebGPU unavailable, falling back to WebGL");
+
+                // Recreate instance forcing GL backend
+                let gl_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+                    backends: wgpu::Backends::GL,
+                    ..Default::default()
+                });
+
+                let gl_surface = gl_instance.create_surface(window.clone()).unwrap();
+
+                let adapter = gl_instance
+                    .request_adapter(&wgpu::RequestAdapterOptions {
+                        power_preference: wgpu::PowerPreference::default(),
+                        compatible_surface: Some(&gl_surface),
+                        force_fallback_adapter: false,
+                    })
+                    .await
+                    .expect("WebGL also unavailable!");
+
+                (gl_surface, adapter, DeviceBackend::WebGL)
+            }
+        };
+
+        let info = adapter.get_info();
+        println!("test {:?}", info);
         // Request device and queue from adapter
         let (tdevice, tqueue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -132,17 +171,11 @@ where
         let depth_texture =
             Texture::create_depth_texture(&device, &size, "depth_texture_primitive");
         let render_context = RenderContext {
-            device,
+            device: Arc::clone(&device),
             queue,
             config,
         };
-        // game_loop.setup(
-        //     Arc::clone(&device),
-        //     Arc::clone(&queue),
-        //     size,
-        //     surface_format,
-        // );
-        // Return initialized State
+        let egui_renderer = EguiRenderer::new(&device, surface_format, None, 1, &window);
         Self {
             surface,
             surface_configured: false,
@@ -152,6 +185,8 @@ where
             game_loop: None::<L>,
             depth_texture,
             scroll_y: 0,
+            egui_renderer,
+            backend,
         }
     }
 
@@ -183,6 +218,7 @@ where
             // NEW!
         } else {
             println!("Not configured");
+            log::warn!("test");
             self.surface_configured = false;
         }
     }
@@ -203,6 +239,7 @@ where
         if !self.surface_configured {
             return Ok(());
         }
+
         self.window.request_redraw();
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -249,8 +286,38 @@ where
             });
 
             if let Some(game_loop) = self.game_loop.as_mut() {
-                game_loop.render(&mut render_pass, &view, self.depth_texture.clone());
+                game_loop.render(
+                    &mut render_pass,
+                    &view,
+                    self.depth_texture.clone(),
+                    &self.backend,
+                );
             }
+        }
+
+        #[cfg(feature = "gui")]
+        {
+            let screen_descriptor = ScreenDescriptor {
+                size_in_pixels: [
+                    self.render_context.config.width,
+                    self.render_context.config.height,
+                ],
+                pixels_per_point: self.window.scale_factor() as f32 * 1.0,
+            };
+            self.egui_renderer.begin_frame(&self.window);
+
+            if let Some(game_loop) = self.game_loop.as_mut() {
+                game_loop.gui_setup(&self.egui_renderer, &self.render_context);
+            }
+
+            self.egui_renderer.end_frame_and_draw(
+                &self.render_context.device,
+                &self.render_context.queue,
+                &mut encoder,
+                &self.window,
+                &view,
+                screen_descriptor,
+            );
         }
 
         self.render_context
@@ -267,6 +334,11 @@ pub fn map_value(value: f32, old_min: f32, old_max: f32, new_max: f32, new_min: 
     new_min + ((value - old_min) / (old_max - old_min)) * (new_max - new_min)
 }
 
+pub struct Renderable {
+    pub mesh: PrimitiveMesh,
+    pub ic: InstanceController,
+}
+
 pub struct RenderContext {
     pub device: Arc<wgpu::Device>, // Logical GPU device
     pub queue: Arc<wgpu::Queue>,   // Command queue for GPU
@@ -276,11 +348,11 @@ pub struct RenderContext {
 impl RenderContext {
     pub fn create_renderable_controller(
         &mut self,
-        meshes: Vec<PrimitiveMesh>,
+        meshes: Vec<Renderable>,
         light: &Light,
         camera: &CameraController,
         shader: &ShaderModule,
-        default_instances: Option<Vec<Instance>>,
+        storage_buffer: Option<InstanceStorage>,
     ) -> RenderableController {
         let ri = PrimitiveMesh::get_render_definitions(
             &self.device,
@@ -291,131 +363,48 @@ impl RenderContext {
             light.light_bind_group_layout.clone(),
             light.light_bind_group.clone(),
             None,
+            &storage_buffer,
         );
 
-        if let Some(default_instances) = default_instances {
-            // let vertices = meshes
-            //     .iter()
-            //     .flat_map(|mesh| mesh.vertices.iter().cloned())
-            //     .collect();
-            let indices = meshes
-                .iter()
-                .flat_map(|mesh| mesh.indices.iter().cloned())
-                .collect();
-            let mut vertex_offset = 0;
-            let mut index_offset = 0;
+        let vertices = meshes
+            .iter()
+            .flat_map(|mesh| mesh.mesh.vertices.iter().cloned())
+            .collect();
+        let indices = meshes
+            .iter()
+            .flat_map(|mesh| mesh.mesh.indices.iter().cloned())
+            .collect();
+        let mut vertex_offset = 0;
+        let mut index_offset = 0;
 
-            let render_meshes: Vec<RenderMeshInformation> = meshes
-                .iter()
-                .map(|mesh| {
-                    let ri = RenderMeshInformation {
-                        instance_controller: InstanceController::new(default_instances.clone()),
-                        vertices: mesh.vertices.clone(),
-                        num_indices: mesh.indices.len() as u32,
-                        indices: mesh.indices.clone(),
-                        vertex_offset,
-                        index_offset,
-                    };
+        let render_meshes: Vec<RenderMeshInformation> = meshes
+            .iter()
+            .enumerate()
+            .map(|(i, mesh)| {
+                let ri = RenderMeshInformation {
+                    index: i,
+                    instance_controller: mesh.ic.clone(),
+                    num_vertices: mesh.mesh.vertices.len() as u32,
+                    num_indices: mesh.mesh.indices.len() as u32,
+                    vertex_offset,
+                    index_offset,
+                };
 
-                    // increment offsets for next mesh
-                    vertex_offset += mesh.vertices.len() as u32;
-                    index_offset += mesh.indices.len() as u32;
+                // increment offsets for next mesh
+                vertex_offset += mesh.mesh.vertices.len() as u32;
+                index_offset += mesh.mesh.indices.len() as u32;
 
-                    ri
-                })
-                .collect();
-            RenderableController::new(
-                0,
-                BufferManager::new(&self.device, 500000, &meshes, &indices),
-                ri,
-                render_meshes,
-            )
-        } else {
-            let instances = instance_cube(
-                Vector3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                Vector3 {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
-                },
-            );
-            // let vertices = meshes
-            //     .iter()
-            //     .flat_map(|mesh| mesh.vertices.iter().cloned())
-            //     .collect();
-            let indices = meshes
-                .iter()
-                .flat_map(|mesh| mesh.indices.iter().cloned())
-                .collect();
-            let mut vertex_offset = 0;
-            let mut index_offset = 0;
-            let render_meshes: Vec<RenderMeshInformation> = meshes
-                .iter()
-                .map(|mesh| {
-                    let ri = RenderMeshInformation {
-                        instance_controller: InstanceController::new(vec![instances.clone()]),
-                        vertex_offset,
-                        index_offset,
-                        vertices: mesh.vertices.clone(),
-                        num_indices: mesh.indices.len() as u32,
-                        indices: mesh.indices.clone(),
-                    };
-
-                    // increment offsets for next mesh
-                    vertex_offset += mesh.vertices.len() as u32;
-                    index_offset += mesh.indices.len() as u32;
-
-                    ri
-                })
-                .collect();
-            RenderableController::new(
-                0,
-                BufferManager::new(&self.device, 500000, &meshes, &indices),
-                ri,
-                render_meshes,
-            )
-        }
+                ri
+            })
+            .collect();
+        RenderableController::new(
+            MeshBufferManager::new(&self.device, 500000, &vertices, &indices),
+            vertices,
+            indices,
+            0,
+            ri,
+            render_meshes,
+            storage_buffer,
+        )
     }
-}
-
-fn instances_list_cube(chunk_size: Vector3<u32>) -> Vec<Instance> {
-    (0..(chunk_size.x * chunk_size.y * chunk_size.z))
-        .map(move |n| {
-            let x = n % chunk_size.x;
-            let z = (n / chunk_size.x) % chunk_size.z;
-            let y = n / (chunk_size.x * chunk_size.z);
-
-            let position = cgmath::Vector3 {
-                x: x as f32 + (chunk_size.x as i32) as f32,
-                y: y as f32,
-                z: z as f32 + (chunk_size.z as i32) as f32,
-            };
-
-            let rotation = if position.is_zero() {
-                // this is needed so an object at (0, 0, 0) won't get scaled to zero
-                // as Quaternions can effect scale if they're not created correctly
-                cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
-            } else {
-                cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(0.0))
-            };
-            let default_color = cgmath::Vector3::new(1.0, 0.0, 0.0);
-            let default_size = cgmath::Vector3::new(1.0, 1.0, 1.0);
-            let default_bounding = default_size + position;
-
-            Instance {
-                index: n,
-                position,
-                rotation,
-                scale: 0.5,
-                should_render: true,
-                color: default_color,
-                size: default_size,
-                bounding: default_bounding,
-            }
-        })
-        .collect::<Vec<_>>()
 }
