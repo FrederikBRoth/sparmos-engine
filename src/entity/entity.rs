@@ -6,88 +6,9 @@ use std::{
     },
 };
 
-use crate::{core::state::DeviceBackend, entity::entities::cube::PrimitiveCube};
+use crate::{core::state::DeviceBackend, entity::{entities::cube::PrimitiveCube, texture::Texture}};
 use cgmath::{Deg, Vector2, Vector3, prelude::*};
 use wgpu::{BindGroup, BindGroupLayout, TextureFormat, util::DeviceExt};
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct PrimitiveVertex {
-    pub position: [f32; 3],
-    pub color: [f32; 3],
-    pub normal: [f32; 3],
-    pub quad_id: u32,
-}
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct TexturedVertex {
-    pub position: [f32; 3],
-    pub tex_coords: [f32; 2],
-    pub normal: [f32; 3],
-}
-impl TexturedVertex {
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        use std::mem;
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<TexturedVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 5]>() as wgpu::BufferAddress,
-                    shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 7]>() as wgpu::BufferAddress,
-                    shader_location: 3,
-                    format: wgpu::VertexFormat::Uint32,
-                },
-            ],
-        }
-    }
-}
-
-impl PrimitiveVertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        use std::mem;
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<PrimitiveVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
-                    shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 9]>() as wgpu::BufferAddress,
-                    shader_location: 3,
-                    format: wgpu::VertexFormat::Uint32,
-                },
-            ],
-        }
-    }
-}
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
@@ -496,12 +417,6 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
     }
 }
 
-pub struct MeshBuffer {
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
-    pub num_indices: u32,
-}
-
 pub trait Rendering {
     fn get_render_definitions(
         device: &wgpu::Device,
@@ -516,142 +431,45 @@ pub trait Rendering {
     ) -> RenderInformation;
 }
 
-// pub struct TexturedMesh {
-//     pub vertices: Vec<TexturedVertex>,
-//     pub indices: Vec<u16>,
-//     pub texture_bytes: Vec<u8>,
-//     pub vertex_offset: u32,
-//     pub index_offset: u32,
-// }
+pub struct TexturedMesh {
+    pub vertices: Vec<TexturedVertex>,
+    pub indices: Vec<u16>,
+    pub texture_bytes: Vec<u8>,
+    pub vertex_offset: u32,
+    pub index_offset: u32,
+}
 
-// impl Rendering for TexturedMesh {
-//     fn get_render_definitions(
-//         device: &wgpu::Device,
-//         shader: &wgpu::ShaderModule,
-//         format: TextureFormat,
-//         queue: &wgpu::Queue,
-//         camera_bind_group_layout: BindGroupLayout,
-//         light_bind_group_layout: BindGroupLayout,
-//         light_bind_group: BindGroup,
-//         texture_bytes: Option<Vec<u8>>,
-//     ) -> RenderInformation {
-//         let diffuse_bytes = texture_bytes.unwrap();
-//         let diffuse_texture =
-//             Texture::from_bytes(&device, &queue, &diffuse_bytes, "happy-tree.png").unwrap();
-//         log::warn!("Texture");
+impl Rendering for TexturedMesh {
+    fn get_render_definitions(
+        device: &wgpu::Device,
+        shader: &wgpu::ShaderModule,
+        format: TextureFormat,
+        queue: &wgpu::Queue,
+        camera_bind_group_layout: BindGroupLayout,
+        light_bind_group_layout: BindGroupLayout,
+        light_bind_group: BindGroup,
+        texture_bytes: Option<Vec<u8>>,
+    ) -> RenderInformation {
+        // let diffuse_bytes = texture_bytes.unwrap();
+        // let diffuse_texture =
+        //     Texture::from_bytes(&device, &queue, &diffuse_bytes, "happy-tree.png").unwrap();
+        // log::warn!("Texture");
 
-//         // Create bind group layout for texture and sampler
-//         let texture_bind_group_layout =
-//             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-//                 entries: &[
-//                     wgpu::BindGroupLayoutEntry {
-//                         binding: 0,
-//                         visibility: wgpu::ShaderStages::FRAGMENT,
-//                         ty: wgpu::BindingType::Texture {
-//                             multisampled: false,
-//                             view_dimension: wgpu::TextureViewDimension::D2,
-//                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
-//                         },
-//                         count: None,
-//                     },
-//                     wgpu::BindGroupLayoutEntry {
-//                         binding: 1,
-//                         visibility: wgpu::ShaderStages::FRAGMENT,
-//                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-//                         count: None,
-//                     },
-//                 ],
-//                 label: Some("texture_bind_group_layout"),
-//             });
 
-//         // Create bind group for the texture
-//         let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-//             layout: &texture_bind_group_layout,
-//             entries: &[
-//                 wgpu::BindGroupEntry {
-//                     binding: 0,
-//                     resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-//                 },
-//                 wgpu::BindGroupEntry {
-//                     binding: 1,
-//                     resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-//                 },
-//             ],
-//             label: Some("diffuse_bind_group"),
-//         });
-//         let render_pipeline_layout =
-//             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-//                 label: Some("Render Pipeline Layout"),
-//                 bind_group_layouts: &[
-//                     &camera_bind_group_layout,
-//                     &light_bind_group_layout,
-//                     &texture_bind_group_layout,
-//                 ],
-//                 push_constant_ranges: &[],
-//             });
+        let ri: RenderInformation = RenderInformation {
+            diffuse: Some(diffuse_bind_group),
+            light_bind_group,
+            pipeline: render_pipeline,
+        };
 
-//         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-//             label: Some("Render Pipeline"),
-//             layout: Some(&render_pipeline_layout),
-//             vertex: wgpu::VertexState {
-//                 module: &shader,
-//                 entry_point: Some("vs_main"),
-//                 buffers: &[TexturedVertex::desc(), InstanceRaw::desc()],
-//                 compilation_options: Default::default(),
-//             },
-//             fragment: Some(wgpu::FragmentState {
-//                 module: &shader,
-//                 entry_point: Some("fs_main"),
-//                 targets: &[Some(wgpu::ColorTargetState {
-//                     format,
-//                     blend: Some(wgpu::BlendState {
-//                         color: wgpu::BlendComponent::REPLACE,
-//                         alpha: wgpu::BlendComponent::REPLACE,
-//                     }),
-//                     write_mask: wgpu::ColorWrites::ALL,
-//                 })],
-//                 compilation_options: Default::default(),
-//             }),
-//             primitive: wgpu::PrimitiveState {
-//                 topology: wgpu::PrimitiveTopology::TriangleList,
-//                 strip_index_format: None,
-//                 front_face: wgpu::FrontFace::Ccw,
-//                 cull_mode: Some(wgpu::Face::Back),
-//                 polygon_mode: wgpu::PolygonMode::Fill,
-//                 unclipped_depth: false,
-//                 conservative: false,
-//             },
-//             depth_stencil: Some(wgpu::DepthStencilState {
-//                 format: Texture::DEPTH_FORMAT,
-//                 depth_write_enabled: true,
-//                 depth_compare: wgpu::CompareFunction::Less,
-//                 stencil: wgpu::StencilState::default(),
-//                 bias: wgpu::DepthBiasState::default(),
-//             }),
-//             multisample: wgpu::MultisampleState {
-//                 count: 2,
-//                 mask: !0,
-//                 alpha_to_coverage_enabled: false,
-//             },
-//             multiview: None,
-//             cache: None,
-//         });
-
-//         let ri: RenderInformation = RenderInformation {
-//             diffuse: Some(diffuse_bind_group),
-//             light_bind_group,
-//             pipeline: render_pipeline,
-//         };
-
-//         ri
-//     }
+        ri
+    }
 // }
 pub struct PrimitiveMesh {
     pub vertices: Vec<PrimitiveVertex>,
     pub indices: Vec<u32>,
 }
 
-impl Rendering for PrimitiveMesh {
     fn get_render_definitions(
         device: &wgpu::Device,
         shader: &wgpu::ShaderModule,
@@ -739,189 +557,31 @@ impl Rendering for PrimitiveMesh {
             cache: None,
         });
 
-        RenderInformation {
-            pipeline: render_pipeline,
-            light_bind_group,
-            instance_storage_layout: storage_buffer,
-            diffuse: None,
-        }
     }
 }
+// pub struct RenderInformation {
+//     pub pipeline: wgpu::RenderPipeline,
+//     pub light_bind_group: wgpu::BindGroup,
+//     pub instance_storage_layout: Option<wgpu::BindGroup>,
+//     pub diffuse: Option<wgpu::BindGroup>,
+// }
+//
+// #[derive(Clone)]
+// pub struct RenderMeshInformation {
+//     pub index: usize,
+//     pub instance_controller: InstanceController,
+//     pub vertex_offset: u32,
+//     pub index_offset: u32,
+//     pub num_indices: u32,
+//     pub num_vertices: u32,
+// }
 
-pub struct RenderInformation {
-    pub pipeline: wgpu::RenderPipeline,
-    pub light_bind_group: wgpu::BindGroup,
-    pub instance_storage_layout: Option<wgpu::BindGroup>,
-    pub diffuse: Option<wgpu::BindGroup>,
-}
-
-#[derive(Clone)]
-pub struct RenderMeshInformation {
-    pub index: usize,
-    pub instance_controller: InstanceController,
-    pub vertex_offset: u32,
-    pub index_offset: u32,
-    pub num_indices: u32,
-    pub num_vertices: u32,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct LightUniform {
-    position: [f32; 3],
-    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
-    _padding: u32,
-    color: [f32; 3],
-    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
-    _padding2: u32,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Color {
-    pub color: [f32; 3],
-    pub _pad: f32, // 4 bytes padding to align to 16 bytes total
-}
-pub struct InstanceStorage {
-    pub instances: Vec<Color>,
-    pub storage_buffer: wgpu::Buffer,
-    pub storage_bind_group_layout: wgpu::BindGroupLayout,
-    pub storage_bind_group: wgpu::BindGroup,
-}
-
-impl InstanceStorage {
-    pub fn new(instances: Vec<Color>, device: &wgpu::Device) -> Self {
-        let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Storage"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-        let storage_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: None,
-            });
-
-        let storage_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &storage_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: storage_buffer.as_entire_binding(),
-            }],
-            label: Some("Quad Color Bind Group"),
-        });
-
-        Self {
-            instances,
-            storage_buffer,
-            storage_bind_group_layout,
-            storage_bind_group,
-        }
-    }
-}
-pub struct Light {
-    pub position: Vector3<f32>,
-    color: Vector3<f32>,
-    pub instance_controller: Option<RenderableController>,
-    pub light_buffer: wgpu::Buffer,
-    pub light_bind_group_layout: wgpu::BindGroupLayout,
-    pub light_bind_group: wgpu::BindGroup,
-}
-
-impl Light {
-    pub fn new(position: Vector3<f32>, color: Vector3<f32>, device: &wgpu::Device) -> Self {
-        let uniform = LightUniform {
-            position: cgmath::Vector3::from(position.clone()).into(),
-            _padding: 0,
-            color: cgmath::Vector3::from(color.clone()).into(),
-            _padding2: 0,
-        };
-        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Light VB"),
-            contents: bytemuck::cast_slice(&[uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let light_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: None,
-            });
-
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &light_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: light_buffer.as_entire_binding(),
-            }],
-            label: None,
-        });
-
-        Self {
-            position,
-            color,
-            light_buffer,
-            light_bind_group_layout,
-            light_bind_group,
-            instance_controller: None,
-        }
-    }
-
-    pub fn get_instance(&self) -> Instance {
-        let rotation = if self.position.is_zero() {
-            // this is needed so an object at (0, 0, 0) won't get scaled to zero
-            // as Quaternions can effect scale if they're not created correctly
-            cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
-        } else {
-            cgmath::Quaternion::from_axis_angle(self.position.normalize(), cgmath::Deg(0.0))
-        };
-        let default_color = cgmath::Vector3::new(1.0, 0.0, 0.0);
-        let default_size = cgmath::Vector3::new(1.0, 1.0, 1.0) * 25.0;
-        let default_bounding = default_size + self.position;
-
-        Instance {
-            index: 0,
-            position: self.position.clone(),
-            rotation,
-            scale: 25.0,
-            should_render: true,
-            color: default_color,
-            size: default_size,
-            bounding: default_bounding,
-        }
-    }
-
-    pub fn to_raw(&self) -> LightUniform {
-        LightUniform {
-            position: cgmath::Vector3::from(self.position).into(),
-            _padding: 0,
-            color: cgmath::Vector3::from(self.color).into(),
-            _padding2: 0,
-        }
-    }
-}
-
-pub struct Quad {
-    pub p00: PrimitiveVertex,
-    pub p01: PrimitiveVertex,
-    pub p10: PrimitiveVertex,
-    pub p11: PrimitiveVertex,
-}
+// pub struct Quad {
+//     pub p00: PrimitiveVertex,
+//     pub p01: PrimitiveVertex,
+//     pub p10: PrimitiveVertex,
+//     pub p11: PrimitiveVertex,
+// }
 pub fn make_cube_primitive() -> PrimitiveMesh {
     let cube = PrimitiveCube::new();
     let polygon: PrimitiveMesh = PrimitiveMesh {
