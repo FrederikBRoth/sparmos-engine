@@ -2,14 +2,24 @@ use anyhow::*;
 use image::GenericImageView;
 use wgpu::{BindGroup, BindGroupLayout, Sampler, TextureView};
 use winit::dpi::PhysicalSize;
+
+use crate::entity::core::system::GpuBindable;
+
 #[derive(Clone)]
 pub struct Texture {
     #[allow(unused)]
+    pub label: String,
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub bind_group_layout: BindGroupLayout,
     pub bind_group: BindGroup,
+}
+
+impl GpuBindable for Texture {
+    fn get_bind_group_layout(&self) -> &BindGroupLayout {
+        &self.bind_group_layout
+    }
 }
 
 impl Texture {
@@ -54,6 +64,7 @@ impl Texture {
         let (bind_group_layout, bind_group) = create_bind_group_and_layout(device, &view, &sampler);
 
         Self {
+            label: label.to_string(),
             texture,
             view,
             sampler,
@@ -101,6 +112,8 @@ impl Texture {
 
         let (bind_group_layout, bind_group) = create_bind_group_and_layout(device, &view, &sampler);
         Self {
+            label: label.to_string(),
+
             texture,
             view,
             sampler,
@@ -170,6 +183,8 @@ impl Texture {
         });
         let (bind_group_layout, bind_group) = create_bind_group_and_layout(device, &view, &sampler);
         Ok(Self {
+            label: label.unwrap_or_else(|| "image-texture").to_string(),
+
             texture,
             view,
             sampler,

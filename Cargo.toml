@@ -24,6 +24,7 @@ spin_sleep = "1.3"
 egui = "0.33"
 egui-wgpu = { version = "0.33", features = ["winit"] }
 egui-winit = { version = "0.33", default-features = false }
+indexmap = "2.13"
 
 [dependencies.image]
 version = "0.25"

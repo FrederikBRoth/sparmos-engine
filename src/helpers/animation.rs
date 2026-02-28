@@ -1,6 +1,6 @@
-use crate::entity::entity::Instance;
-use crate::entity::entity::RenderableController;
 use cgmath::{Vector3, num_traits::pow};
+
+use crate::entity::core::instance::Instance;
 
 #[derive(Copy, Clone)]
 pub struct EaseInEaseOutLoop;

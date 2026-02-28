@@ -9,8 +9,8 @@ use winit::{
 };
 
 use crate::{
-    entity::entity::OPENGL_TO_WGPU_MATRIX,
-    helpers::animation::{EaseOut, Linear},
+    entity::core::system::{GpuBindable, System},
+    helpers::{animation::Linear, line_trace::OPENGL_TO_WGPU_MATRIX},
 };
 
 pub struct CameraAnimator {
@@ -141,13 +141,12 @@ impl CameraUniform {
     }
 }
 
-pub struct CameraController {
+pub struct CameraSystem {
     pub queue: Arc<wgpu::Queue>,
     pub camera: Camera,
     pub camera_uniform: CameraUniform,
     pub camera_buffer: wgpu::Buffer,
     pub camera_bind_group_layout: BindGroupLayout,
-    pub camera_bind_group: wgpu::BindGroup,
     pub auto: bool,
     pub speed: f32,
 
@@ -165,7 +164,7 @@ pub struct CameraController {
     pub is_turn_right_pressed: bool,
 }
 
-impl CameraController {
+impl CameraSystem {
     pub fn new(
         speed: f32,
         sensitivity: f32,
@@ -225,14 +224,6 @@ impl CameraController {
                 label: Some("camera_bind_group_layout"),
             });
 
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-            label: Some("camera_bind_group"),
-        });
         log::warn!("Shader");
         Self {
             queue,
@@ -241,7 +232,6 @@ impl CameraController {
             sensitivity,
             camera,
             camera_uniform,
-            camera_bind_group,
             camera_bind_group_layout,
             camera_buffer,
             is_up_pressed: false,
@@ -482,4 +472,27 @@ pub fn normalize_and_map_camera_height(x: i64, a: i64, b: i64, start: f32, end: 
 
     // Map from 0.0–1.0 to -25.0–25.0
     start + (end * 2.0) * normalized
+}
+
+impl GpuBindable for CameraSystem {
+    fn get_bind_group_layout(&self) -> &BindGroupLayout {
+        &self.camera_bind_group_layout
+    }
+}
+
+impl System for CameraSystem {
+    fn make_bind_group(&self, device: &wgpu::Device) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &self.camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: self.camera_buffer.as_entire_binding(),
+            }],
+            label: Some("camera_bind_group"),
+        })
+    }
+
+    fn get_system_name(&self) -> String {
+        "Camera System".to_string()
+    }
 }

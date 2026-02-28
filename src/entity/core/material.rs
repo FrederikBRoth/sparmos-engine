@@ -1,44 +1,82 @@
-use wgpu::{BindGroupLayout, RenderPipeline, SurfaceConfiguration, TextureFormat};
+use std::collections::HashMap;
 
-use crate::{
-    core::camera::{Camera, CameraController},
-    entity::{
-        self,
-        core::{geometry::Mesh, instance::InstanceController, light::Light},
-        texture::Texture,
-    },
+use indexmap::{IndexMap, map::Entry};
+use wgpu::{
+    BindGroupLayout, RenderPipeline, ShaderModule, SurfaceConfiguration, TextureFormat, wgc::device,
 };
 
-//
+use crate::entity::{
+    core::{
+        geometry::Mesh, instance::InstanceController, render::GlobalRenderContext,
+        system::GpuBindable,
+    },
+    texture::Texture,
+};
+
 pub struct Material {
     pub pipeline: RenderPipeline,
+    pub texture: Option<Texture>,
+    pub layouts: IndexMap<String, BindGroupLayout>,
 }
-pub struct RenderContext {
-    pub light: BindGroupLayout,
-    pub camera: BindGroupLayout,
-    pub surface_config: SurfaceConfiguration,
+
+pub struct MaterialBuilder {
+    layouts: IndexMap<String, BindGroupLayout>,
+    texture: Option<Texture>,
+    shader: String,
 }
-pub fn create_material(
-    mesh: &Mesh,
-    instance_controller: &InstanceController,
-    device: &wgpu::Device,
-    shader: &wgpu::ShaderModule,
-    texture: &Option<entity::texture::Texture>,
-    global_layouts: &RenderContext,
-    extra_bind_groups: &Vec<BindGroupLayout>,
-) -> Material {
-    //First check is if a texture was passed to the material. If it was, do a textured pipeline, if
-    //not go primitive
-    let layout = match texture {
-        Some(texture) => {
+
+impl MaterialBuilder {
+    pub fn new() -> Self {
+        MaterialBuilder {
+            layouts: IndexMap::new(),
+            texture: None,
+            shader: String::new(),
+        }
+    }
+
+    pub fn add_layout<T: GpuBindable>(&mut self, name: &str, bindable: &T) -> &mut Self {
+        self.layouts
+            .insert(name.to_string(), bindable.get_bind_group_layout().clone());
+        self
+    }
+
+    pub fn add_layout_raw(&mut self, name: &str, layout: &BindGroupLayout) -> &mut Self {
+        self.layouts.insert(name.to_string(), layout.clone());
+        self
+    }
+
+    //Will lookup shader in Global Context
+    pub fn add_shader(&mut self, shader: &str) -> &mut Self {
+        self.shader = shader.to_string();
+        self
+    }
+
+    pub fn add_texture(&mut self, texture: Texture) -> &mut Self {
+        self.layouts.insert(
+            texture.label.clone(),
+            texture.get_bind_group_layout().clone(),
+        );
+        self.texture = Some(texture);
+        self
+    }
+
+    pub fn build(
+        self,
+        mesh: &Mesh,
+        device: &wgpu::Device,
+        render_context: &GlobalRenderContext,
+        instance_controller: &InstanceController,
+    ) -> Material {
+        let bind_group_layouts: Vec<&BindGroupLayout> =
+            self.layouts.iter().map(|(_, v)| v).collect();
+        let shader = render_context.shaders.get(&self.shader).unwrap();
+        //First check is if a texture was passed to the material. If it was, do a textured pipeline, if
+        //not go primitive
+        let pipeline = if self.texture.is_some() {
             let render_pipeline_layout =
                 device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Render Pipeline Layout"),
-                    bind_group_layouts: &[
-                        &global_layouts.camera,
-                        &global_layouts.light,
-                        &texture.bind_group_layout,
-                    ],
+                    bind_group_layouts: &bind_group_layouts,
                     push_constant_ranges: &[],
                 });
 
@@ -58,7 +96,7 @@ pub fn create_material(
                     module: &shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: global_layouts.surface_config.format,
+                        format: render_context.config.format,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent::REPLACE,
                             alpha: wgpu::BlendComponent::REPLACE,
@@ -92,12 +130,11 @@ pub fn create_material(
                 cache: None,
             });
             render_pipeline
-        }
-        None => {
+        } else {
             let render_pipeline_layout =
                 device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Render Pipeline Layout"),
-                    bind_group_layouts: &[&global_layouts.camera, &global_layouts.light],
+                    bind_group_layouts: &bind_group_layouts,
                     push_constant_ranges: &[],
                 });
 
@@ -117,7 +154,7 @@ pub fn create_material(
                     module: shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: global_layouts.surface_config.format,
+                        format: render_context.config.format,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent::REPLACE,
                             alpha: wgpu::BlendComponent::REPLACE,
@@ -156,8 +193,12 @@ pub fn create_material(
             });
 
             render_pipeline
-        }
-    };
+        };
 
-    Material { pipeline: layout }
+        Material {
+            pipeline,
+            layouts: self.layouts.clone(),
+            texture: self.texture,
+        }
+    }
 }

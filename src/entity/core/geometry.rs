@@ -70,7 +70,7 @@ impl Primitive {
         };
         Mesh::new(
             device,
-            bytemuck::cast_slice(&self.vertices),
+            &self.vertices,
             &self.indices,
             self.vertices.len() as u32,
             self.indices.len() as u32,
@@ -111,7 +111,7 @@ impl Textured {
 
         Mesh::new(
             device,
-            bytemuck::cast_slice(&self.vertices),
+            &self.vertices,
             &self.indices,
             self.vertices.len() as u32,
             self.indices.len() as u32,
@@ -128,9 +128,9 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn new(
+    pub fn new<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
         device: &wgpu::Device,
-        vertices: &[u8],
+        vertices: &Vec<T>,
         indices: &Vec<u32>,
         vertex_count: u32,
 
@@ -139,7 +139,7 @@ impl Mesh {
     ) -> Self {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Big Vertex Buffer"),
-            contents: vertices,
+            contents: bytemuck::cast_slice(vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
 

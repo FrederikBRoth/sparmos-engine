@@ -7,14 +7,16 @@ pub struct Color {
     pub _pad: f32, // 4 bytes padding to align to 16 bytes total
 }
 pub struct StorageBuffer {
-    pub instances: Vec<Color>,
     pub storage_buffer: wgpu::Buffer,
     pub storage_bind_group_layout: wgpu::BindGroupLayout,
-    pub storage_bind_group: wgpu::BindGroup,
+    pub storage_bind_group: Option<wgpu::BindGroup>,
 }
 
 impl StorageBuffer {
-    pub fn new(instances: Vec<Color>, device: &wgpu::Device) -> Self {
+    pub fn new<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        instances: &Vec<T>,
+        device: &wgpu::Device,
+    ) -> Self {
         let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Storage"),
             contents: bytemuck::cast_slice(&instances),
@@ -45,10 +47,40 @@ impl StorageBuffer {
         });
 
         Self {
-            instances,
             storage_buffer,
             storage_bind_group_layout,
-            storage_bind_group,
+            storage_bind_group: Some(storage_bind_group),
+        }
+    }
+
+    pub fn new_layout<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        instances: &Vec<T>,
+        device: &wgpu::Device,
+    ) -> Self {
+        let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Storage"),
+            contents: bytemuck::cast_slice(&instances),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let storage_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: None,
+            });
+
+        Self {
+            storage_buffer,
+            storage_bind_group_layout,
+            storage_bind_group: None,
         }
     }
 }

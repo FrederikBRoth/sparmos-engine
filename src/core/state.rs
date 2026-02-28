@@ -10,12 +10,9 @@ use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
-use crate::core::camera::CameraController;
 use crate::core::gui::EguiRenderer;
-use crate::entity::entity::{
-    Instance, InstanceController, InstanceRaw, InstanceStorage, Light, MeshBufferManager,
-    PrimitiveMesh, RenderMeshInformation, RenderableController, Rendering, instance_cube,
-};
+use crate::entity::core::render::GlobalRenderContext;
+use crate::entity::core::system::{System, Systems};
 use crate::entity::texture::Texture;
 
 pub enum DeviceBackend {
@@ -28,14 +25,14 @@ where
 {
     pub surface: wgpu::Surface<'static>,
     pub surface_configured: bool,
-    pub render_context: RenderContext,
+    pub render_context: GlobalRenderContext,
+    pub systems: Systems,
     pub size: winit::dpi::PhysicalSize<u32>,
 
     #[allow(dead_code)]
     pub window: Arc<Window>, // Application window
     pub game_loop: Option<L>,
     pub scroll_y: i64,
-    pub depth_texture: Texture,
     pub egui_renderer: EguiRenderer,
     pub backend: DeviceBackend,
 }
@@ -44,11 +41,12 @@ pub trait GameLoop {
         &mut self,
         render: &mut wgpu::RenderPass,
         texture_view: &wgpu::TextureView,
-        depth_texture: Texture,
         backend: &DeviceBackend,
+        tc: &GlobalRenderContext,
+        systems: &Systems,
     );
 
-    fn update(&mut self, dt: std::time::Duration, rc: &RenderContext);
+    fn update(&mut self, dt: std::time::Duration, rc: &GlobalRenderContext);
 
     fn process_event(&mut self, event: &WindowEvent, screen: &PhysicalSize<u32>);
 
@@ -57,7 +55,7 @@ pub trait GameLoop {
     fn setup<S: GameLoop>(&mut self, state: &mut State<S>);
 
     #[cfg(feature = "gui")]
-    fn gui_setup(&mut self, egui_renderer: &EguiRenderer, render_context: &RenderContext);
+    fn gui_setup(&mut self, egui_renderer: &EguiRenderer, render_context: &GlobalRenderContext);
 }
 
 impl<L> State<L>
@@ -168,22 +166,23 @@ where
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        let depth_texture =
-            Texture::create_depth_texture(&device, &size, "depth_texture_primitive");
-        let render_context = RenderContext {
+        let render_context = GlobalRenderContext {
+            depth_texture: Texture::create_depth_texture(&device, &size, "depth_texture_primitive"),
+            shaders: HashMap::new(),
             device: Arc::clone(&device),
             queue,
             config,
         };
         let egui_renderer = EguiRenderer::new(&device, surface_format, None, 1, &window);
+        let systems = Systems::new();
         Self {
             surface,
             surface_configured: false,
             render_context,
             size,
             window,
+            systems,
             game_loop: None::<L>,
-            depth_texture,
             scroll_y: 0,
             egui_renderer,
             backend,
@@ -210,7 +209,7 @@ where
             if let Some(game_loop) = self.game_loop.as_mut() {
                 game_loop.resize(&self.render_context.config);
             }
-            self.depth_texture = Texture::create_depth_texture(
+            self.render_context.depth_texture = Texture::create_depth_texture(
                 &self.render_context.device,
                 &new_size,
                 "depth_texture_primitive",
@@ -254,6 +253,7 @@ where
                 });
 
         {
+            //TODO: Should also be abstracted so that the user can change these parameters
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -272,7 +272,7 @@ where
                 })],
                 depth_stencil_attachment: {
                     Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_texture.view,
+                        view: &self.render_context.depth_texture.view,
                         depth_ops: Some(wgpu::Operations {
                             load: wgpu::LoadOp::Clear(1.0),
                             store: wgpu::StoreOp::Store,
@@ -289,8 +289,9 @@ where
                 game_loop.render(
                     &mut render_pass,
                     &view,
-                    self.depth_texture.clone(),
                     &self.backend,
+                    &self.render_context,
+                    &self.systems,
                 );
             }
         }
@@ -332,79 +333,4 @@ where
 pub fn map_value(value: f32, old_min: f32, old_max: f32, new_max: f32, new_min: f32) -> f32 {
     let value = value.clamp(old_min, old_max);
     new_min + ((value - old_min) / (old_max - old_min)) * (new_max - new_min)
-}
-
-pub struct Renderable {
-    pub mesh: PrimitiveMesh,
-    pub ic: InstanceController,
-}
-
-pub struct RenderContext {
-    pub device: Arc<wgpu::Device>, // Logical GPU device
-    pub queue: Arc<wgpu::Queue>,   // Command queue for GPU
-    pub config: wgpu::SurfaceConfiguration,
-}
-
-impl RenderContext {
-    pub fn create_renderable_controller(
-        &mut self,
-        meshes: Vec<Renderable>,
-        light: &Light,
-        camera: &CameraController,
-        shader: &ShaderModule,
-        storage_buffer: Option<InstanceStorage>,
-    ) -> RenderableController {
-        let ri = PrimitiveMesh::get_render_definitions(
-            &self.device,
-            shader,
-            self.config.format,
-            &self.queue,
-            camera.camera_bind_group_layout.clone(),
-            light.light_bind_group_layout.clone(),
-            light.light_bind_group.clone(),
-            None,
-            &storage_buffer,
-        );
-
-        let vertices = meshes
-            .iter()
-            .flat_map(|mesh| mesh.mesh.vertices.iter().cloned())
-            .collect();
-        let indices = meshes
-            .iter()
-            .flat_map(|mesh| mesh.mesh.indices.iter().cloned())
-            .collect();
-        let mut vertex_offset = 0;
-        let mut index_offset = 0;
-
-        let render_meshes: Vec<RenderMeshInformation> = meshes
-            .iter()
-            .enumerate()
-            .map(|(i, mesh)| {
-                let ri = RenderMeshInformation {
-                    index: i,
-                    instance_controller: mesh.ic.clone(),
-                    num_vertices: mesh.mesh.vertices.len() as u32,
-                    num_indices: mesh.mesh.indices.len() as u32,
-                    vertex_offset,
-                    index_offset,
-                };
-
-                // increment offsets for next mesh
-                vertex_offset += mesh.mesh.vertices.len() as u32;
-                index_offset += mesh.mesh.indices.len() as u32;
-
-                ri
-            })
-            .collect();
-        RenderableController::new(
-            MeshBufferManager::new(&self.device, 500000, &vertices, &indices),
-            vertices,
-            indices,
-            0,
-            ri,
-            render_meshes,
-            storage_buffer,
-        )
-    }
 }

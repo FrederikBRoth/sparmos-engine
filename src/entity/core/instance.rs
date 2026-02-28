@@ -1,7 +1,5 @@
 use std::sync::{Arc, atomic::AtomicUsize};
 
-use wgpu::util::DeviceExt;
-
 use crate::entity::core::geometry::VertexBufferLayoutOwned;
 
 #[derive(Clone)]
@@ -11,9 +9,13 @@ pub struct InstanceController {
     pub count: usize,
     pub atomic_usize: Arc<AtomicUsize>,
     pub buffer_layout: VertexBufferLayoutOwned,
+    pub instance_buffer: wgpu::Buffer,
 }
 impl InstanceController {
-    pub fn new<T: InstanceToRaw>(instances: Vec<Instance>) -> InstanceController {
+    pub fn new<T: InstanceToRaw + Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        instances: Vec<Instance>,
+        device: &wgpu::Device,
+    ) -> InstanceController {
         let len = instances
             .clone()
             .iter()
@@ -21,11 +23,18 @@ impl InstanceController {
             .map(T::to_raw)
             .collect::<Vec<_>>()
             .len();
+        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Global Instance Buffer"),
+            size: (len * std::mem::size_of::<T>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         InstanceController {
             instances: instances.clone(),
             offset: 0,
             atomic_usize: Arc::new(AtomicUsize::new(len)),
             count: len,
+            instance_buffer,
             buffer_layout: T::desc(),
         }
     }
@@ -136,59 +145,6 @@ impl InstanceToRaw for InstanceRaw {
             model,
             color: instance.color.into(),
             normal: cgmath::Matrix3::from(instance.rotation).into(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Color {
-    pub color: [f32; 3],
-    pub _pad: f32, // 4 bytes padding to align to 16 bytes total
-}
-pub struct StorageBuffer {
-    pub instances: Vec<Color>,
-    pub storage_buffer: wgpu::Buffer,
-    pub storage_bind_group_layout: wgpu::BindGroupLayout,
-    pub storage_bind_group: wgpu::BindGroup,
-}
-
-impl StorageBuffer {
-    pub fn new(instances: Vec<Color>, device: &wgpu::Device) -> Self {
-        let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Storage"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-        let storage_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: None,
-            });
-
-        let storage_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &storage_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: storage_buffer.as_entire_binding(),
-            }],
-            label: Some("Quad Color Bind Group"),
-        });
-
-        Self {
-            instances,
-            storage_buffer,
-            storage_bind_group_layout,
-            storage_bind_group,
         }
     }
 }
