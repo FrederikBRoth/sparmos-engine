@@ -16,6 +16,12 @@ pub struct Texture {
     pub bind_group: BindGroup,
 }
 
+pub struct TextureSampleView {
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+    pub sampler: wgpu::Sampler,
+}
+
 impl GpuBindable for Texture {
     fn get_bind_group_layout(&self) -> &BindGroupLayout {
         &self.bind_group_layout
@@ -30,7 +36,7 @@ impl Texture {
         device: &wgpu::Device,
         size: &PhysicalSize<u32>,
         label: &str,
-    ) -> Self {
+    ) -> TextureSampleView {
         let size = wgpu::Extent3d {
             width: size.width.max(1),
             height: size.height.max(1),
@@ -61,15 +67,11 @@ impl Texture {
             lod_max_clamp: 100.0,
             ..Default::default()
         });
-        let (bind_group_layout, bind_group) = create_bind_group_and_layout(device, &view, &sampler);
 
-        Self {
-            label: label.to_string(),
+        TextureSampleView {
             texture,
             view,
             sampler,
-            bind_group_layout,
-            bind_group,
         }
     }
 
@@ -222,6 +224,7 @@ fn create_bind_group_and_layout(
             label: Some("texture_bind_group_layout"),
         });
 
+    println!("test!");
     // Create bind group for the texture
     let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         layout: &texture_bind_group_layout,
@@ -237,5 +240,7 @@ fn create_bind_group_and_layout(
         ],
         label: Some("diffuse_bind_group"),
     });
+    println!("test23!");
+
     (texture_bind_group_layout, diffuse_bind_group)
 }

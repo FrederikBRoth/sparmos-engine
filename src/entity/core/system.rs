@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use wgpu::{BindGroup, BindGroupLayout};
 
+use crate::entity::systems::{camera::CameraSystem, light::LightSystem};
+
 pub trait GpuBindable {
     fn get_bind_group_layout(&self) -> &BindGroupLayout;
 }

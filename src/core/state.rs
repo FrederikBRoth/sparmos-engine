@@ -26,7 +26,6 @@ where
     pub surface: wgpu::Surface<'static>,
     pub surface_configured: bool,
     pub render_context: GlobalRenderContext,
-    pub systems: Systems,
     pub size: winit::dpi::PhysicalSize<u32>,
 
     #[allow(dead_code)]
@@ -43,7 +42,6 @@ pub trait GameLoop {
         texture_view: &wgpu::TextureView,
         backend: &DeviceBackend,
         tc: &GlobalRenderContext,
-        systems: &Systems,
     );
 
     fn update(&mut self, dt: std::time::Duration, rc: &GlobalRenderContext);
@@ -174,14 +172,12 @@ where
             config,
         };
         let egui_renderer = EguiRenderer::new(&device, surface_format, None, 1, &window);
-        let systems = Systems::new();
         Self {
             surface,
             surface_configured: false,
             render_context,
             size,
             window,
-            systems,
             game_loop: None::<L>,
             scroll_y: 0,
             egui_renderer,
@@ -286,13 +282,7 @@ where
             });
 
             if let Some(game_loop) = self.game_loop.as_mut() {
-                game_loop.render(
-                    &mut render_pass,
-                    &view,
-                    &self.backend,
-                    &self.render_context,
-                    &self.systems,
-                );
+                game_loop.render(&mut render_pass, &view, &self.backend, &self.render_context);
             }
         }
 

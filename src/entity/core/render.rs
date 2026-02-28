@@ -10,12 +10,12 @@ use crate::{
     entity::{
         core::{geometry::Mesh, instance::InstanceController, material::Material, system::Systems},
         systems,
-        texture::Texture,
+        texture::{Texture, TextureSampleView},
     },
 };
 
 pub struct GlobalRenderContext {
-    pub depth_texture: Texture,
+    pub depth_texture: TextureSampleView,
     pub shaders: HashMap<String, ShaderModule>,
     pub device: Arc<wgpu::Device>, // Logical GPU device
     pub queue: Arc<wgpu::Queue>,   // Command queue for GPU
@@ -31,7 +31,7 @@ impl GlobalRenderContext {
 }
 
 impl<'a> DrawMesh for wgpu::RenderPass<'a> {
-    fn draw(&mut self, backend: &DeviceBackend, scene: &Scene, systems: &Systems) {
+    fn draw_scene(&mut self, backend: &DeviceBackend, scene: &Scene, systems: &Systems) {
         let render_items = scene.to_render_items();
         let mut bind_group_id = 0;
         //binds all system bind groups
@@ -66,13 +66,17 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
 
 pub trait DrawMesh {
     #[allow(unused)]
-    fn draw(&mut self, backend: &DeviceBackend, scene: &Scene, systems: &Systems);
+    fn draw_scene(&mut self, backend: &DeviceBackend, scene: &Scene, systems: &Systems);
 }
 
-struct Scene {
-    objects: Vec<RenderObject>,
+pub struct Scene {
+    pub objects: Vec<RenderObject>,
 }
+
 impl Scene {
+    pub fn new() -> Self {
+        Scene { objects: vec![] }
+    }
     pub fn to_render_items(&self) -> Vec<RenderItem> {
         let mut items = Vec::new();
 
@@ -90,9 +94,9 @@ impl Scene {
 //The two structs below might look identical, but the render item is useful for the render pipeline
 //iterating through refences is faster if we need multi pass rendering for shados etc.
 pub struct RenderObject {
-    mesh: Mesh,
-    instance_controller: InstanceController,
-    material: Material,
+    pub mesh: Mesh,
+    pub instance_controller: InstanceController,
+    pub material: Material,
 }
 //
 pub struct RenderItem<'a> {

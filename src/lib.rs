@@ -6,6 +6,7 @@ pub use egui;
 pub use log;
 // #[cfg(target_arch = "wasm32")]
 // pub use wasm_bindgen_rayon::init_thread_pool;
+pub use hecs;
 pub use web_time;
 pub use wgpu;
 pub use winit;

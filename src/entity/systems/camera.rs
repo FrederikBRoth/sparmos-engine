@@ -9,7 +9,10 @@ use winit::{
 };
 
 use crate::{
-    entity::core::system::{GpuBindable, System},
+    entity::core::{
+        render::GlobalRenderContext,
+        system::{GpuBindable, System},
+    },
     helpers::{animation::Linear, line_trace::OPENGL_TO_WGPU_MATRIX},
 };
 
@@ -142,7 +145,6 @@ impl CameraUniform {
 }
 
 pub struct CameraSystem {
-    pub queue: Arc<wgpu::Queue>,
     pub camera: Camera,
     pub camera_uniform: CameraUniform,
     pub camera_buffer: wgpu::Buffer,
@@ -226,7 +228,6 @@ impl CameraSystem {
 
         log::warn!("Shader");
         Self {
-            queue,
             auto: false,
             speed,
             sensitivity,
@@ -323,7 +324,7 @@ impl CameraSystem {
         self.camera.update_forward();
     }
 
-    pub fn update_camera(&mut self, dt: std::time::Duration) {
+    pub fn update_camera(&mut self, dt: std::time::Duration, rc: &GlobalRenderContext) {
         // let forward = self.camera.target - self.camera.eye;
         // let forward_norm = forward.normalize();
         // let forward_mag = forward.magnitude();
@@ -410,7 +411,7 @@ impl CameraSystem {
         // }
 
         self.camera_uniform.update_view_proj(&self.camera);
-        self.queue.write_buffer(
+        rc.queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),

@@ -38,6 +38,16 @@ impl InstanceController {
             buffer_layout: T::desc(),
         }
     }
+
+    pub fn update(&mut self, queue: &wgpu::Queue) {
+        let all_instances_raw: Vec<InstanceRaw> =
+            self.instances.iter().map(InstanceRaw::to_raw).collect();
+        queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&all_instances_raw),
+        );
+    }
 }
 
 #[derive(Clone)]
@@ -52,6 +62,20 @@ pub struct Instance {
     pub bounding: cgmath::Vector3<f32>,
 }
 
+impl Default for Instance {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            position: cgmath::Vector3::new(1.0, 1.0, 1.0),
+            rotation: cgmath::Quaternion::new(1.0, 1.0, 1.0, 1.0), // Identity rotation
+            should_render: true,
+            scale: 20.0,
+            color: cgmath::Vector3::new(1.0, 1.0, 1.0), // white
+            size: cgmath::Vector3::new(1.0, 1.0, 1.0),
+            bounding: cgmath::Vector3::new(1.0, 1.0, 1.0),
+        }
+    }
+}
 pub trait InstanceToRaw {
     fn desc() -> VertexBufferLayoutOwned;
     fn to_raw(instance: &Instance) -> Self;

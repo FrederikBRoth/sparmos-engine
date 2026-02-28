@@ -35,7 +35,7 @@ pub struct TexturedVertex {
 }
 
 pub struct Primitive {
-    pub num_indices: u32,
+    // pub num_indices: u32,
     pub vertices: Vec<PrimitiveVertex>,
     pub indices: Vec<u32>,
 }
@@ -80,7 +80,7 @@ impl Primitive {
 }
 
 pub struct Textured {
-    pub num_indices: u32,
+    // pub num_indices: u32,
     pub vertices: Vec<TexturedVertex>,
     pub indices: Vec<u32>,
 }

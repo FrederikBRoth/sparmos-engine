@@ -1046,6 +1046,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hecs"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a2d85ff28b1e1a1c183b6ca9ec1a6b97e7937fb989988a74d9db39760a07b8"
+dependencies = [
+ "foldhash 0.2.0",
+ "hashbrown 0.16.1",
+ "spin",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2672,6 +2683,7 @@ dependencies = [
  "getrandom 0.3.3",
  "glob",
  "gloo-timers",
+ "hecs",
  "image",
  "indexmap",
  "js-sys",
@@ -2687,6 +2699,12 @@ dependencies = [
  "wgpu",
  "winit",
 ]
+
+[[package]]
+name = "spin"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
 
 [[package]]
 name = "spin_sleep"

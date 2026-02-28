@@ -61,9 +61,8 @@ impl MaterialBuilder {
     }
 
     pub fn build(
-        self,
+        &self,
         mesh: &Mesh,
-        device: &wgpu::Device,
         render_context: &GlobalRenderContext,
         instance_controller: &InstanceController,
     ) -> Material {
@@ -74,123 +73,133 @@ impl MaterialBuilder {
         //not go primitive
         let pipeline = if self.texture.is_some() {
             let render_pipeline_layout =
-                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Render Pipeline Layout"),
-                    bind_group_layouts: &bind_group_layouts,
-                    push_constant_ranges: &[],
-                });
+                render_context
+                    .device
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("Render Pipeline Layout"),
+                        bind_group_layouts: &bind_group_layouts,
+                        push_constant_ranges: &[],
+                    });
 
-            let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Render Pipeline"),
-                layout: Some(&render_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[
-                        mesh.buffer_layout.to_wgpu(),
-                        instance_controller.buffer_layout.to_wgpu(),
-                    ],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: render_context.config.format,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent::REPLACE,
-                            alpha: wgpu::BlendComponent::REPLACE,
+            let render_pipeline =
+                render_context
+                    .device
+                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some("Render Pipeline"),
+                        layout: Some(&render_pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &shader,
+                            entry_point: Some("vs_main"),
+                            buffers: &[
+                                mesh.buffer_layout.to_wgpu(),
+                                instance_controller.buffer_layout.to_wgpu(),
+                            ],
+                            compilation_options: Default::default(),
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &shader,
+                            entry_point: Some("fs_main"),
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: render_context.config.format,
+                                blend: Some(wgpu::BlendState {
+                                    color: wgpu::BlendComponent::REPLACE,
+                                    alpha: wgpu::BlendComponent::REPLACE,
+                                }),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                            compilation_options: Default::default(),
                         }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: Texture::DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: 2,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            });
+                        primitive: wgpu::PrimitiveState {
+                            topology: wgpu::PrimitiveTopology::TriangleList,
+                            strip_index_format: None,
+                            front_face: wgpu::FrontFace::Ccw,
+                            cull_mode: Some(wgpu::Face::Back),
+                            polygon_mode: wgpu::PolygonMode::Fill,
+                            unclipped_depth: false,
+                            conservative: false,
+                        },
+                        depth_stencil: Some(wgpu::DepthStencilState {
+                            format: Texture::DEPTH_FORMAT,
+                            depth_write_enabled: true,
+                            depth_compare: wgpu::CompareFunction::Less,
+                            stencil: wgpu::StencilState::default(),
+                            bias: wgpu::DepthBiasState::default(),
+                        }),
+                        multisample: wgpu::MultisampleState {
+                            count: 2,
+                            mask: !0,
+                            alpha_to_coverage_enabled: false,
+                        },
+                        multiview: None,
+                        cache: None,
+                    });
             render_pipeline
         } else {
             let render_pipeline_layout =
-                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Render Pipeline Layout"),
-                    bind_group_layouts: &bind_group_layouts,
-                    push_constant_ranges: &[],
-                });
+                render_context
+                    .device
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("Render Pipeline Layout"),
+                        bind_group_layouts: &bind_group_layouts,
+                        push_constant_ranges: &[],
+                    });
 
-            let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Render Pipeline"),
-                layout: Some(&render_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[
-                        mesh.buffer_layout.to_wgpu(),
-                        instance_controller.buffer_layout.to_wgpu(),
-                    ],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: render_context.config.format,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent::REPLACE,
-                            alpha: wgpu::BlendComponent::REPLACE,
+            let render_pipeline =
+                render_context
+                    .device
+                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some("Render Pipeline"),
+                        layout: Some(&render_pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: shader,
+                            entry_point: Some("vs_main"),
+                            buffers: &[
+                                mesh.buffer_layout.to_wgpu(),
+                                instance_controller.buffer_layout.to_wgpu(),
+                            ],
+                            compilation_options: Default::default(),
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: shader,
+                            entry_point: Some("fs_main"),
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: render_context.config.format,
+                                blend: Some(wgpu::BlendState {
+                                    color: wgpu::BlendComponent::REPLACE,
+                                    alpha: wgpu::BlendComponent::REPLACE,
+                                }),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                            compilation_options: Default::default(),
                         }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less, // standard depth test
-                    stencil: wgpu::StencilState::default(),     // no stencil operations
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                // depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                // If the pipeline will be used with a multiview render pass, this
-                // indicates how many array layers the attachments will have.
-                multiview: None,
-                // Useful for optimizing shader compilation on Android
-                cache: None,
-            });
+                        primitive: wgpu::PrimitiveState {
+                            topology: wgpu::PrimitiveTopology::TriangleList,
+                            strip_index_format: None,
+                            front_face: wgpu::FrontFace::Ccw,
+                            cull_mode: Some(wgpu::Face::Back),
+                            polygon_mode: wgpu::PolygonMode::Fill,
+                            unclipped_depth: false,
+                            conservative: false,
+                        },
+                        depth_stencil: Some(wgpu::DepthStencilState {
+                            format: wgpu::TextureFormat::Depth32Float,
+                            depth_write_enabled: true,
+                            depth_compare: wgpu::CompareFunction::Less, // standard depth test
+                            stencil: wgpu::StencilState::default(),     // no stencil operations
+                            bias: wgpu::DepthBiasState::default(),
+                        }),
+                        // depth_stencil: None,
+                        multisample: wgpu::MultisampleState {
+                            count: 1,
+                            mask: !0,
+                            alpha_to_coverage_enabled: false,
+                        },
+                        // If the pipeline will be used with a multiview render pass, this
+                        // indicates how many array layers the attachments will have.
+                        multiview: None,
+                        // Useful for optimizing shader compilation on Android
+                        cache: None,
+                    });
 
             render_pipeline
         };
@@ -198,7 +207,7 @@ impl MaterialBuilder {
         Material {
             pipeline,
             layouts: self.layouts.clone(),
-            texture: self.texture,
+            texture: self.texture.clone(),
         }
     }
 }
