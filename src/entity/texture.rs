@@ -3,7 +3,7 @@ use image::GenericImageView;
 use wgpu::{BindGroup, BindGroupLayout, Sampler, TextureView};
 use winit::dpi::PhysicalSize;
 
-use crate::entity::core::system::GpuBindable;
+use crate::entity::core::resource::GpuBindable;
 
 #[derive(Clone)]
 pub struct Texture {

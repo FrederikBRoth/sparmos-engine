@@ -5,25 +5,30 @@ use std::{iter, vec};
 
 use cgmath::{Vector3, prelude::*};
 use egui_wgpu::ScreenDescriptor;
+use hecs::World;
 use wgpu::{Backend, ShaderModel, ShaderModule, SurfaceConfiguration};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
-use crate::core::gui::EguiRenderer;
+use crate::application::gui::EguiRenderer;
+use crate::entity::core::engine::Engine;
 use crate::entity::core::render::GlobalRenderContext;
-use crate::entity::core::system::{System, Systems};
+use crate::entity::core::resource::{Resources, System};
 use crate::entity::texture::Texture;
 
 pub enum DeviceBackend {
     WebGL,
     WebGPU,
 }
+pub struct Core {
+    pub engine: Engine,
+    pub render_context: GlobalRenderContext,
+}
 
 pub struct State {
     pub surface: wgpu::Surface<'static>,
     pub surface_configured: bool,
-    pub render_context: GlobalRenderContext,
     pub size: winit::dpi::PhysicalSize<u32>,
 
     #[allow(dead_code)]
@@ -31,21 +36,22 @@ pub struct State {
     pub scroll_y: i64,
     pub egui_renderer: EguiRenderer,
     pub backend: DeviceBackend,
+    pub core: Core,
 }
-pub trait GameLoop {
+pub trait Game {
     fn render(
         &mut self,
         render: &mut wgpu::RenderPass,
         texture_view: &wgpu::TextureView,
         backend: &DeviceBackend,
-        tc: &GlobalRenderContext,
+        core: &mut Core,
     );
 
-    fn update(&mut self, dt: std::time::Duration, rc: &GlobalRenderContext);
+    fn update(&mut self, dt: std::time::Duration, core: &mut Core);
 
-    fn process_event(&mut self, event: &WindowEvent, screen: &PhysicalSize<u32>);
+    fn process_event(&mut self, event: &WindowEvent, screen: &PhysicalSize<u32>, core: &mut Core);
 
-    fn resize(&mut self, config: &SurfaceConfiguration);
+    fn resize(&mut self, core: &mut Core);
 
     fn setup(&mut self, state: &mut State);
 
@@ -166,12 +172,16 @@ impl State {
             config,
         };
         let egui_renderer = EguiRenderer::new(&device, surface_format, None, 1, &window);
+        let core = Core {
+            engine: Engine::default(),
+            render_context,
+        };
         Self {
             surface,
             surface_configured: false,
-            render_context,
             size,
             window,
+            core,
             scroll_y: 0,
             egui_renderer,
             backend,
@@ -185,24 +195,26 @@ impl State {
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
-            self.render_context.config.width = new_size.width;
-            self.render_context.config.height = new_size.height;
-            self.surface
-                .configure(&self.render_context.device, &self.render_context.config);
+            self.core.render_context.config.width = new_size.width;
+            self.core.render_context.config.height = new_size.height;
+            self.surface.configure(
+                &self.core.render_context.device,
+                &self.core.render_context.config,
+            );
             self.surface_configured = true;
 
             // if let Some(game_loop) = self.game_loop.as_mut() {
             //     game_loop.resize(&self.render_context.config);
             // }
-            self.render_context.depth_texture = Texture::create_depth_texture(
-                &self.render_context.device,
+            self.core.render_context.depth_texture = Texture::create_depth_texture(
+                &self.core.render_context.device,
                 &new_size,
                 "depth_texture_primitive",
             );
             // NEW!
         } else {
             println!("Not configured");
-            log::warn!("test");
+            log::warn!("Not Configured");
             self.surface_configured = false;
         }
     }
@@ -218,7 +230,7 @@ impl State {
         // }
     }
 
-    pub fn render(&mut self, game: &mut Box<dyn GameLoop>) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, game: &mut Box<dyn Game>) -> Result<(), wgpu::SurfaceError> {
         if !self.surface_configured {
             return Ok(());
         }
@@ -230,12 +242,11 @@ impl State {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder =
-            self.render_context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Render Encoder"),
-                });
+        let mut encoder = self.core.render_context.device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            },
+        );
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -250,7 +261,7 @@ impl State {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.render_context.depth_texture.view,
+                    view: &self.core.render_context.depth_texture.view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -261,20 +272,15 @@ impl State {
                 timestamp_writes: None,
             });
 
-            game.render(
-                &mut render_pass,
-                &view,
-                &self.backend,
-                &mut self.render_context,
-            );
+            game.render(&mut render_pass, &view, &self.backend, &mut self.core);
         }
 
         #[cfg(feature = "gui")]
         {
             let screen_descriptor = ScreenDescriptor {
                 size_in_pixels: [
-                    self.render_context.config.width,
-                    self.render_context.config.height,
+                    self.core.render_context.config.width,
+                    self.core.render_context.config.height,
                 ],
                 pixels_per_point: self.window.scale_factor() as f32,
             };
@@ -282,8 +288,8 @@ impl State {
             self.egui_renderer.begin_frame(&self.window);
             game.gui_setup(&self.egui_renderer);
             self.egui_renderer.end_frame_and_draw(
-                &self.render_context.device,
-                &self.render_context.queue,
+                &self.core.render_context.device,
+                &self.core.render_context.queue,
                 &mut encoder,
                 &self.window,
                 &view,
@@ -291,7 +297,8 @@ impl State {
             );
         }
 
-        self.render_context
+        self.core
+            .render_context
             .queue
             .submit(std::iter::once(encoder.finish()));
 

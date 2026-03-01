@@ -1,7 +1,6 @@
-pub mod core;
+pub mod application;
 pub mod entity;
 pub mod helpers;
-
 pub use cgmath;
 pub use egui;
 pub use hecs;
@@ -13,16 +12,16 @@ pub use winit;
 pub mod prelude {
     use winit::event_loop::EventLoop;
 
-    use crate::core::{
+    use crate::application::{
         event_loop::{App, AppLifecycle, UserEvent},
-        state::GameLoop,
+        state::Game,
     };
 
     pub fn run_game<U, G, L>(hooks: G, gameloop: L) -> anyhow::Result<()>
     where
         U: 'static + Send,
         G: AppLifecycle<U> + 'static,
-        L: GameLoop + 'static,
+        L: Game + 'static,
     {
         #[cfg(not(target_arch = "wasm32"))]
         {

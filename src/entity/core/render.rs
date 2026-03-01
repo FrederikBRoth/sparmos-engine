@@ -6,9 +6,12 @@ use std::{
 use wgpu::{ShaderModule, wgc::MAX_BIND_GROUPS};
 
 use crate::{
-    core::state::DeviceBackend,
+    application::state::DeviceBackend,
     entity::{
-        core::{geometry::Mesh, instance::InstanceController, material::Material, system::Systems},
+        core::{
+            engine::Engine, geometry::Mesh, instance::InstanceController, material::Material,
+            resource::Resources,
+        },
         systems,
         texture::{Texture, TextureSampleView},
     },
@@ -23,7 +26,7 @@ pub struct GlobalRenderContext {
 }
 impl GlobalRenderContext {
     pub fn add_shader(&mut self, device: &wgpu::Device, label: &str, shader_path: &str) {
-        device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(label),
             source: wgpu::ShaderSource::Wgsl(shader_path.into()),
         });
@@ -31,11 +34,11 @@ impl GlobalRenderContext {
 }
 
 impl<'a> DrawMesh for wgpu::RenderPass<'a> {
-    fn draw_scene(&mut self, backend: &DeviceBackend, scene: &Scene, systems: &Systems) {
+    fn draw_scene(&mut self, _backend: &DeviceBackend, scene: &Scene, engine: &Engine) {
         let render_items = scene.to_render_items();
         let mut bind_group_id = 0;
         //binds all system bind groups
-        for (name, bind_group) in systems.bind_groups.iter() {
+        for (_name, bind_group) in engine.resources.bind_groups.iter() {
             self.set_bind_group(bind_group_id, bind_group, &[]);
             bind_group_id += 1;
         }
@@ -66,7 +69,7 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
 
 pub trait DrawMesh {
     #[allow(unused)]
-    fn draw_scene(&mut self, backend: &DeviceBackend, scene: &Scene, systems: &Systems);
+    fn draw_scene(&mut self, backend: &DeviceBackend, scene: &Scene, systems: &Engine);
 }
 
 pub struct Scene {

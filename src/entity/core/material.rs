@@ -8,7 +8,7 @@ use wgpu::{
 use crate::entity::{
     core::{
         geometry::Mesh, instance::InstanceController, render::GlobalRenderContext,
-        system::GpuBindable,
+        resource::GpuBindable,
     },
     texture::Texture,
 };

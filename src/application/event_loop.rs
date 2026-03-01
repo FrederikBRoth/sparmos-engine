@@ -6,9 +6,9 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::core::state::{GameLoop, State};
+use crate::application::state::{Game, State};
 #[cfg(not(feature = "gui"))]
-use crate::{core::gui::EguiRenderer, entity::core::render::GlobalRenderContext};
+use crate::{application::gui::EguiRenderer, entity::core::render::GlobalRenderContext};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -17,10 +17,7 @@ use wasm_bindgen::{JsCast, closure::Closure};
 use web_sys::{Event, KeyboardEvent};
 
 pub enum EngineEvent {
-    StateReady {
-        state: State,
-        game: Box<dyn GameLoop>,
-    },
+    StateReady { state: State, game: Box<dyn Game> },
 }
 
 pub enum UserEvent<U> {
@@ -35,7 +32,7 @@ where
 {
     pub is_focused: bool,
     pub hooks: Box<dyn AppLifecycle<U>>,
-    pub game_loop: Option<Box<dyn GameLoop>>,
+    pub game_loop: Option<Box<dyn Game>>,
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<UserEvent<U>>>,
     state: Option<State>,
@@ -49,7 +46,7 @@ where
     pub fn new<G>(
         #[cfg(target_arch = "wasm32")] event_loop: &EventLoop<UserEvent<U>>,
         hooks: G,
-        game_loop: impl GameLoop + 'static,
+        game_loop: impl Game + 'static,
     ) -> Self
     where
         G: AppLifecycle<U> + 'static,
@@ -148,8 +145,19 @@ where
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent<U>) {
         match event {
             UserEvent::EngineEvent(engine_event) => match engine_event {
-                EngineEvent::StateReady { mut state, game } => {
+                EngineEvent::StateReady {
+                    mut state,
+                    mut game,
+                } => {
                     self.last_time = web_time::Instant::now();
+
+                    let size = state.window().inner_size();
+
+                    log::warn!("{:?}", size);
+                    state.resize(size);
+                    game.resize(&mut state.core);
+
+                    state.window().request_redraw();
 
                     self.state = Some(state);
                     self.game_loop = Some(game);
@@ -189,7 +197,7 @@ where
             .egui_renderer
             .handle_input(state.window.as_ref(), &event)
         {
-            game.process_event(&event, &state.size);
+            game.process_event(&event, &state.size, &mut state.core);
         }
 
         match event {
@@ -199,18 +207,18 @@ where
                 let dt = self.last_time.elapsed();
                 self.last_time = web_time::Instant::now();
 
-                game.update(dt, &state.render_context);
+                game.update(dt, &mut state.core);
 
                 state.render(game).unwrap();
             }
 
             WindowEvent::Resized(size) => {
                 state.resize(size);
-                game.resize(&state.render_context.config);
+                game.resize(&mut state.core);
             }
 
             _ => {
-                game.process_event(&event, &state.size);
+                game.process_event(&event, &state.size, &mut state.core);
             }
         }
     }

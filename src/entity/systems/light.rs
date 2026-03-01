@@ -2,8 +2,8 @@ use cgmath::Vector3;
 use wgpu::util::DeviceExt;
 
 use crate::entity::core::{
+    resource::{GpuBindable, System},
     storage_buffer::StorageBuffer,
-    system::{GpuBindable, System},
 };
 
 #[repr(C)]
