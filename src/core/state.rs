@@ -19,10 +19,8 @@ pub enum DeviceBackend {
     WebGL,
     WebGPU,
 }
-pub struct State<L>
-where
-    L: GameLoop,
-{
+
+pub struct State {
     pub surface: wgpu::Surface<'static>,
     pub surface_configured: bool,
     pub render_context: GlobalRenderContext,
@@ -30,7 +28,6 @@ where
 
     #[allow(dead_code)]
     pub window: Arc<Window>, // Application window
-    pub game_loop: Option<L>,
     pub scroll_y: i64,
     pub egui_renderer: EguiRenderer,
     pub backend: DeviceBackend,
@@ -50,18 +47,15 @@ pub trait GameLoop {
 
     fn resize(&mut self, config: &SurfaceConfiguration);
 
-    fn setup<S: GameLoop>(&mut self, state: &mut State<S>);
+    fn setup(&mut self, state: &mut State);
 
     #[cfg(feature = "gui")]
-    fn gui_setup(&mut self, egui_renderer: &EguiRenderer, render_context: &GlobalRenderContext);
+    fn gui_setup(&mut self, egui_renderer: &EguiRenderer);
 }
 
-impl<L> State<L>
-where
-    L: GameLoop,
-{
+impl State {
     // Creates a new State object, initializing all required resources
-    pub async fn new(window: Arc<Window>) -> State<L> {
+    pub async fn new(window: Arc<Window>) -> State {
         let size = window.inner_size();
 
         // Create a new GPU instance
@@ -86,7 +80,7 @@ where
 
         log::warn!("{:?}", adapter.clone().unwrap().get_info());
 
-        let adapter = Err("Something");
+        // let adapter = Err("Something");
         let (surface, adapter, backend) = match adapter {
             Ok(a) => {
                 let surface = instance.create_surface(window.clone()).unwrap();
@@ -178,15 +172,10 @@ where
             render_context,
             size,
             window,
-            game_loop: None::<L>,
             scroll_y: 0,
             egui_renderer,
             backend,
         }
-    }
-
-    pub fn set_loop(&mut self, gameloop: L) {
-        self.game_loop = Some(gameloop);
     }
 
     pub fn window(&self) -> &Arc<Window> {
@@ -202,9 +191,9 @@ where
                 .configure(&self.render_context.device, &self.render_context.config);
             self.surface_configured = true;
 
-            if let Some(game_loop) = self.game_loop.as_mut() {
-                game_loop.resize(&self.render_context.config);
-            }
+            // if let Some(game_loop) = self.game_loop.as_mut() {
+            //     game_loop.resize(&self.render_context.config);
+            // }
             self.render_context.depth_texture = Texture::create_depth_texture(
                 &self.render_context.device,
                 &new_size,
@@ -218,24 +207,24 @@ where
         }
     }
     pub fn input(&mut self, event: &WindowEvent) {
-        if let Some(game_loop) = self.game_loop.as_mut() {
-            game_loop.process_event(event, &self.size);
-        }
+        // if let Some(game_loop) = self.game_loop.as_mut() {
+        //     game_loop.process_event(event, &self.size);
+        // }
     }
 
     pub fn update(&mut self, dt: std::time::Duration) {
-        if let Some(game_loop) = self.game_loop.as_mut() {
-            game_loop.update(dt, &self.render_context);
-        }
+        // if let Some(game_loop) = self.game_loop.as_mut() {
+        //     game_loop.update(dt, &self.render_context);
+        // }
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        // We can't render unless the surface is configured
+    pub fn render(&mut self, game: &mut Box<dyn GameLoop>) -> Result<(), wgpu::SurfaceError> {
         if !self.surface_configured {
             return Ok(());
         }
 
         self.window.request_redraw();
+
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -249,7 +238,6 @@ where
                 });
 
         {
-            //TODO: Should also be abstracted so that the user can change these parameters
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -257,33 +245,28 @@ where
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.0,
-                            g: 0.0,
-                            b: 0.0,
-                            a: 0.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: {
-                    Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.render_context.depth_texture.view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    })
-                },
-                // depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.render_context.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
 
-            if let Some(game_loop) = self.game_loop.as_mut() {
-                game_loop.render(&mut render_pass, &view, &self.backend, &self.render_context);
-            }
+            game.render(
+                &mut render_pass,
+                &view,
+                &self.backend,
+                &mut self.render_context,
+            );
         }
 
         #[cfg(feature = "gui")]
@@ -293,14 +276,11 @@ where
                     self.render_context.config.width,
                     self.render_context.config.height,
                 ],
-                pixels_per_point: self.window.scale_factor() as f32 * 1.0,
+                pixels_per_point: self.window.scale_factor() as f32,
             };
+
             self.egui_renderer.begin_frame(&self.window);
-
-            if let Some(game_loop) = self.game_loop.as_mut() {
-                game_loop.gui_setup(&self.egui_renderer, &self.render_context);
-            }
-
+            game.gui_setup(&self.egui_renderer);
             self.egui_renderer.end_frame_and_draw(
                 &self.render_context.device,
                 &self.render_context.queue,
@@ -313,7 +293,8 @@ where
 
         self.render_context
             .queue
-            .submit(iter::once(encoder.finish()));
+            .submit(std::iter::once(encoder.finish()));
+
         output.present();
 
         Ok(())

@@ -7,6 +7,8 @@ use winit::{
 };
 
 use crate::core::state::{GameLoop, State};
+#[cfg(not(feature = "gui"))]
+use crate::{core::gui::EguiRenderer, entity::core::render::GlobalRenderContext};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -14,81 +16,71 @@ use wasm_bindgen::{JsCast, closure::Closure};
 #[cfg(target_arch = "wasm32")]
 use web_sys::{Event, KeyboardEvent};
 
-pub enum EngineEvent<L>
-where
-    L: GameLoop,
-{
-    StateReady(State<L>),
+pub enum EngineEvent {
+    StateReady {
+        state: State,
+        game: Box<dyn GameLoop>,
+    },
 }
 
-pub enum UserEvent<U, L>
-where
-    L: GameLoop,
-{
-    EngineEvent(EngineEvent<L>),
+pub enum UserEvent<U> {
+    EngineEvent(EngineEvent),
     Custom(U),
 }
 
 // #[derive(Default)]
-pub struct App<U, G, L>
+pub struct App<U>
 where
     U: 'static,
-    G: AppLifecycle<U, L>,
-    L: 'static + GameLoop,
 {
     pub is_focused: bool,
-    pub hooks: G,
-    pub game_loop: Option<L>,
+    pub hooks: Box<dyn AppLifecycle<U>>,
+    pub game_loop: Option<Box<dyn GameLoop>>,
     #[cfg(target_arch = "wasm32")]
-    proxy: Option<winit::event_loop::EventLoopProxy<UserEvent<U, L>>>,
-    state: Option<State<L>>,
+    proxy: Option<winit::event_loop::EventLoopProxy<UserEvent<U>>>,
+    state: Option<State>,
     last_time: web_time::Instant,
-    _marker: std::marker::PhantomData<U>,
 }
 
-impl<U, G, L> App<U, G, L>
+impl<U> App<U>
 where
     U: 'static,
-    G: AppLifecycle<U, L>,
-    L: 'static + GameLoop,
 {
-    pub fn new(
-        #[cfg(target_arch = "wasm32")] event_loop: &EventLoop<UserEvent<U, L>>,
-        game: G,
-        game_loop: Option<L>,
-    ) -> Self {
+    pub fn new<G>(
+        #[cfg(target_arch = "wasm32")] event_loop: &EventLoop<UserEvent<U>>,
+        hooks: G,
+        game_loop: impl GameLoop + 'static,
+    ) -> Self
+    where
+        G: AppLifecycle<U> + 'static,
+    {
         #[cfg(target_arch = "wasm32")]
         let proxy = Some(event_loop.create_proxy());
+
         Self {
             is_focused: true,
             state: None,
-            hooks: game,
-            game_loop,
+            hooks: Box::new(hooks), // ← boxed lifecycle
+            game_loop: Some(Box::new(game_loop)),
             #[cfg(target_arch = "wasm32")]
             proxy,
             last_time: web_time::Instant::now(),
-            _marker: std::marker::PhantomData,
         }
     }
 }
 
-pub trait AppLifecycle<U, L>: 'static
-where
-    L: 'static + GameLoop,
-{
+pub trait AppLifecycle<U>: 'static {
     #[cfg(target_arch = "wasm32")]
-    fn on_resumed(&mut self, _event_loop: &winit::event_loop::EventLoopProxy<UserEvent<U, L>>) {}
+    fn on_resumed(&mut self, _event_loop: &winit::event_loop::EventLoopProxy<UserEvent<U>>) {}
     #[cfg(not(target_arch = "wasm32"))]
     fn on_resumed(&mut self) {}
-    fn on_user_event(&mut self, proxy: &mut State<L>, _event: U) {}
-    fn on_device_event(&mut self, event: DeviceEvent, proxy: &mut State<L>) {}
+    fn on_user_event(&mut self, proxy: &mut State, _event: U) {}
+    fn on_device_event(&mut self, event: DeviceEvent, proxy: &mut State) {}
 }
 
-impl<U: 'static, G: 'static, L: 'static> ApplicationHandler<UserEvent<U, L>> for App<U, G, L>
+impl<U: 'static> ApplicationHandler<UserEvent<U>> for App<U>
 where
     U: 'static,
-    G: AppLifecycle<U, L>,
-    L: GameLoop,
 {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[allow(unused_mut)]
@@ -107,55 +99,60 @@ where
             let html_canvas_element = canvas.unchecked_into();
             window_attributes = window_attributes.with_canvas(Some(html_canvas_element));
         }
-
-        // Create window object
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+
         #[cfg(target_arch = "wasm32")]
         {
-            if let Some(proxy) = self.proxy.take() {
-                let proxy_clone = proxy.clone();
-                if let Some(mut game_loop) = self.game_loop.take() {
-                    wasm_bindgen_futures::spawn_local(async move {
-                        let mut state = State::<L>::new(window.clone()).await;
-                        game_loop.setup(&mut state);
-                        state.set_loop(game_loop);
+            let proxy = self.proxy.take().unwrap();
+            let mut game = self.game_loop.take().unwrap();
 
-                        let size = state.window().inner_size();
-                        if size.width > 0 && size.height > 0 {
-                            state.resize(size);
-                        }
+            let value = proxy.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let mut state = State::new(window.clone()).await;
 
-                        state.window().request_redraw();
+                game.setup(&mut state);
 
-                        assert!(
-                            proxy_clone
-                                .send_event(UserEvent::EngineEvent(EngineEvent::StateReady(state)))
-                                .is_ok()
-                        )
-                    });
+                let size = state.window().inner_size();
+                if size.width > 0 && size.height > 0 {
+                    state.resize(size);
                 }
 
-                self.hooks.on_resumed(&proxy.clone());
-            }
+                state.window().request_redraw();
+
+                value
+                    .send_event(UserEvent::EngineEvent(EngineEvent::StateReady {
+                        state,
+                        game,
+                    }))
+                    .is_ok();
+            });
+
+            self.hooks.on_resumed(&proxy);
         }
+
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(mut game_loop) = self.game_loop.take() {
-            let mut state = pollster::block_on(State::<L>::new(window.clone()));
-            game_loop.setup(&mut state);
-            state.set_loop(game_loop);
-            self.state = Some(state);
+        {
+            if let Some(mut game_loop) = self.game_loop.take() {
+                let mut state = pollster::block_on(State::new(window.clone()));
+                game_loop.setup(&mut state);
+
+                self.state = Some(state);
+                self.game_loop = Some(game_loop);
+            }
+
             self.hooks.on_resumed();
-        } else {
-            eprintln!("Warning: game loop already taken or not initialized.");
         }
     }
 
     #[allow(unused_mut)]
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent<U, L>) {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent<U>) {
         match event {
             UserEvent::EngineEvent(engine_event) => match engine_event {
-                EngineEvent::StateReady(state) => {
+                EngineEvent::StateReady { mut state, game } => {
+                    self.last_time = web_time::Instant::now();
+
                     self.state = Some(state);
+                    self.game_loop = Some(game);
                 }
             },
 
@@ -166,55 +163,65 @@ where
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let state = match &mut self.state {
-            Some(canvas) => canvas,
-            None => return,
+        let (state, game) = match (&mut self.state, &mut self.game_loop) {
+            (Some(state), Some(game)) => (state, game),
+            _ => {
+                return;
+            }
         };
+
         if let WindowEvent::Focused(focused) = event {
-            println!("Focused: {}", focused);
             self.is_focused = focused;
+
             if focused {
-                state.render().unwrap();
+                state.render(game.into()).unwrap();
+
                 self.last_time = web_time::Instant::now();
             }
-            // Do something when focused
         }
-        if self.is_focused {
-            #[cfg(feature = "gui")]
-            if !state
-                .egui_renderer
-                .handle_input(state.window.as_ref(), &event)
-            {
-                state.input(&event);
+
+        if !self.is_focused {
+            return;
+        }
+
+        #[cfg(feature = "gui")]
+        if !state
+            .egui_renderer
+            .handle_input(state.window.as_ref(), &event)
+        {
+            game.process_event(&event, &state.size);
+        }
+
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+
+            WindowEvent::RedrawRequested => {
+                let dt = self.last_time.elapsed();
+                self.last_time = web_time::Instant::now();
+
+                game.update(dt, &state.render_context);
+
+                state.render(game).unwrap();
             }
-            match event {
-                WindowEvent::CloseRequested => {
-                    println!("The close button was pressed; stopping");
-                    event_loop.exit();
-                }
-                WindowEvent::RedrawRequested => {
-                    let dt = self.last_time.elapsed();
-                    self.last_time = web_time::Instant::now();
-                    state.update(dt);
-                    state.render().unwrap();
-                }
-                WindowEvent::Resized(size) => {
-                    // Reconfigures the size of the surface. We do not re-render
-                    // here as this event is always followed up by redraw request.
-                    state.resize(size);
-                }
-                _ => (),
+
+            WindowEvent::Resized(size) => {
+                state.resize(size);
+                game.resize(&state.render_context.config);
+            }
+
+            _ => {
+                game.process_event(&event, &state.size);
             }
         }
     }
 
-    // fn device_event(
-    //     &mut self,
-    //     event_loop: &ActiveEventLoop,
-    //     device_id: DeviceId,
-    //     event: DeviceEvent,
-    // ) {
-    //     self.hooks
-    //         .on_device_event(event, self.state.as_mut().unwrap());
-    // }
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        self.hooks
+            .on_device_event(event, self.state.as_mut().unwrap());
+    }
 }

@@ -224,7 +224,6 @@ fn create_bind_group_and_layout(
             label: Some("texture_bind_group_layout"),
         });
 
-    println!("test!");
     // Create bind group for the texture
     let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         layout: &texture_bind_group_layout,
