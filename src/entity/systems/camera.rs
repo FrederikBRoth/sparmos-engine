@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
 use cgmath::{EuclideanSpace, InnerSpace, Point3, SquareMatrix, Vector3, Vector4};
-use hecs::Bundle;
 use wgpu::{BindGroupLayout, Device, util::DeviceExt};
 use winit::{
-    dpi::{PhysicalSize, Size},
+    dpi::PhysicalSize,
     event::{ElementState, KeyEvent, WindowEvent},
     keyboard::{KeyCode, PhysicalKey},
 };
@@ -64,7 +61,7 @@ impl Camera {
             forward: Vector3::unit_z(),
             yaw: 111.0,
             pitch: 1.0,
-            aspect: screen_size.width as f32 / screen_size.height as f32,
+            aspect: screen_size.width / screen_size.height,
             fovy: 25.0,
             znear: 0.1,
             zfar: 100.0,
@@ -120,11 +117,11 @@ impl Camera {
         let view_projection = OPENGL_TO_WGPU_MATRIX * self.build_view_projection_matrix();
         if let Some(inv_view_projection) = view_projection.invert() {
             let world = Vector4::new(
-                (mouse_x) / (screen_width as f32) * 2.0 - 1.0,
+                (mouse_x) / (screen_width) * 2.0 - 1.0,
                 // Screen Origin is Top Left    (Mouse Origin is Top Left)
                 //          (screen.y - (viewport.y as f32)) / (viewport.w as f32) * 2.0 - 1.0,
                 // Screen Origin is Bottom Left (Mouse Origin is Top Left)
-                (1.0 - (mouse_y) / (screen_height as f32)) * 2.0 - 1.0,
+                (1.0 - (mouse_y) / screen_height) * 2.0 - 1.0,
                 mouse_z * 2.0 - 1.0,
                 1.0,
             );
@@ -175,6 +172,12 @@ impl CameraUniform {
     }
 }
 
+impl Default for CameraUniform {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct CameraSystem {
     // pub camera: Camera,
     pub camera_uniform: CameraUniform,
@@ -200,7 +203,7 @@ pub struct CameraSystem {
 impl CameraSystem {
     pub fn new(speed: f32, sensitivity: f32, device: &Device, camera: &Camera) -> Self {
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
+        camera_uniform.update_view_proj(camera);
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[camera_uniform]),

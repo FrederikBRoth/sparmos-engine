@@ -3,17 +3,13 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use wgpu::{ShaderModule, wgc::MAX_BIND_GROUPS};
+use wgpu::ShaderModule;
 
 use crate::{
     application::state::DeviceBackend,
     entity::{
-        core::{
-            engine::Engine, geometry::Mesh, instance::InstanceController, material::Material,
-            resource::Resources,
-        },
-        systems,
-        texture::{Texture, TextureSampleView},
+        core::{engine::Engine, geometry::Mesh, instance::InstanceController, material::Material},
+        texture::TextureSampleView,
     },
 };
 
@@ -76,11 +72,17 @@ pub struct Scene {
     pub objects: Vec<RenderObject>,
 }
 
+impl Default for Scene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Scene {
     pub fn new() -> Self {
         Scene { objects: vec![] }
     }
-    pub fn to_render_items(&self) -> Vec<RenderItem> {
+    pub fn to_render_items(&self) -> Vec<RenderItem<'_>> {
         let mut items = Vec::new();
 
         for object in &self.objects {

@@ -1,9 +1,5 @@
-use std::collections::HashMap;
-
-use indexmap::{IndexMap, map::Entry};
-use wgpu::{
-    BindGroupLayout, RenderPipeline, ShaderModule, SurfaceConfiguration, TextureFormat, wgc::device,
-};
+use indexmap::IndexMap;
+use wgpu::{BindGroupLayout, RenderPipeline};
 
 use crate::entity::{
     core::{
@@ -81,59 +77,57 @@ impl MaterialBuilder {
                         push_constant_ranges: &[],
                     });
 
-            let render_pipeline =
-                render_context
-                    .device
-                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                        label: Some("Render Pipeline"),
-                        layout: Some(&render_pipeline_layout),
-                        vertex: wgpu::VertexState {
-                            module: &shader,
-                            entry_point: Some("vs_main"),
-                            buffers: &[
-                                mesh.buffer_layout.to_wgpu(),
-                                instance_controller.buffer_layout.to_wgpu(),
-                            ],
-                            compilation_options: Default::default(),
-                        },
-                        fragment: Some(wgpu::FragmentState {
-                            module: &shader,
-                            entry_point: Some("fs_main"),
-                            targets: &[Some(wgpu::ColorTargetState {
-                                format: render_context.config.format,
-                                blend: Some(wgpu::BlendState {
-                                    color: wgpu::BlendComponent::REPLACE,
-                                    alpha: wgpu::BlendComponent::REPLACE,
-                                }),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            })],
-                            compilation_options: Default::default(),
-                        }),
-                        primitive: wgpu::PrimitiveState {
-                            topology: wgpu::PrimitiveTopology::TriangleList,
-                            strip_index_format: None,
-                            front_face: wgpu::FrontFace::Ccw,
-                            cull_mode: Some(wgpu::Face::Back),
-                            polygon_mode: wgpu::PolygonMode::Fill,
-                            unclipped_depth: false,
-                            conservative: false,
-                        },
-                        depth_stencil: Some(wgpu::DepthStencilState {
-                            format: Texture::DEPTH_FORMAT,
-                            depth_write_enabled: true,
-                            depth_compare: wgpu::CompareFunction::Less,
-                            stencil: wgpu::StencilState::default(),
-                            bias: wgpu::DepthBiasState::default(),
-                        }),
-                        multisample: wgpu::MultisampleState {
-                            count: 2,
-                            mask: !0,
-                            alpha_to_coverage_enabled: false,
-                        },
-                        multiview: None,
-                        cache: None,
-                    });
-            render_pipeline
+            render_context
+                .device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("Render Pipeline"),
+                    layout: Some(&render_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: shader,
+                        entry_point: Some("vs_main"),
+                        buffers: &[
+                            mesh.buffer_layout.to_wgpu(),
+                            instance_controller.buffer_layout.to_wgpu(),
+                        ],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: shader,
+                        entry_point: Some("fs_main"),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: render_context.config.format,
+                            blend: Some(wgpu::BlendState {
+                                color: wgpu::BlendComponent::REPLACE,
+                                alpha: wgpu::BlendComponent::REPLACE,
+                            }),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: Some(wgpu::Face::Back),
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: Texture::DEPTH_FORMAT,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::Less,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState {
+                        count: 2,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    multiview: None,
+                    cache: None,
+                })
         } else {
             let render_pipeline_layout =
                 render_context
@@ -144,64 +138,61 @@ impl MaterialBuilder {
                         push_constant_ranges: &[],
                     });
 
-            let render_pipeline =
-                render_context
-                    .device
-                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                        label: Some("Render Pipeline"),
-                        layout: Some(&render_pipeline_layout),
-                        vertex: wgpu::VertexState {
-                            module: shader,
-                            entry_point: Some("vs_main"),
-                            buffers: &[
-                                mesh.buffer_layout.to_wgpu(),
-                                instance_controller.buffer_layout.to_wgpu(),
-                            ],
-                            compilation_options: Default::default(),
-                        },
-                        fragment: Some(wgpu::FragmentState {
-                            module: shader,
-                            entry_point: Some("fs_main"),
-                            targets: &[Some(wgpu::ColorTargetState {
-                                format: render_context.config.format,
-                                blend: Some(wgpu::BlendState {
-                                    color: wgpu::BlendComponent::REPLACE,
-                                    alpha: wgpu::BlendComponent::REPLACE,
-                                }),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            })],
-                            compilation_options: Default::default(),
-                        }),
-                        primitive: wgpu::PrimitiveState {
-                            topology: wgpu::PrimitiveTopology::TriangleList,
-                            strip_index_format: None,
-                            front_face: wgpu::FrontFace::Ccw,
-                            cull_mode: Some(wgpu::Face::Back),
-                            polygon_mode: wgpu::PolygonMode::Fill,
-                            unclipped_depth: false,
-                            conservative: false,
-                        },
-                        depth_stencil: Some(wgpu::DepthStencilState {
-                            format: wgpu::TextureFormat::Depth32Float,
-                            depth_write_enabled: true,
-                            depth_compare: wgpu::CompareFunction::Less, // standard depth test
-                            stencil: wgpu::StencilState::default(),     // no stencil operations
-                            bias: wgpu::DepthBiasState::default(),
-                        }),
-                        // depth_stencil: None,
-                        multisample: wgpu::MultisampleState {
-                            count: 1,
-                            mask: !0,
-                            alpha_to_coverage_enabled: false,
-                        },
-                        // If the pipeline will be used with a multiview render pass, this
-                        // indicates how many array layers the attachments will have.
-                        multiview: None,
-                        // Useful for optimizing shader compilation on Android
-                        cache: None,
-                    });
-
-            render_pipeline
+            render_context
+                .device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("Render Pipeline"),
+                    layout: Some(&render_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: shader,
+                        entry_point: Some("vs_main"),
+                        buffers: &[
+                            mesh.buffer_layout.to_wgpu(),
+                            instance_controller.buffer_layout.to_wgpu(),
+                        ],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: shader,
+                        entry_point: Some("fs_main"),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: render_context.config.format,
+                            blend: Some(wgpu::BlendState {
+                                color: wgpu::BlendComponent::REPLACE,
+                                alpha: wgpu::BlendComponent::REPLACE,
+                            }),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: Some(wgpu::Face::Back),
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth32Float,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::Less, // standard depth test
+                        stencil: wgpu::StencilState::default(),     // no stencil operations
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    // depth_stencil: None,
+                    multisample: wgpu::MultisampleState {
+                        count: 1,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    // If the pipeline will be used with a multiview render pass, this
+                    // indicates how many array layers the attachments will have.
+                    multiview: None,
+                    // Useful for optimizing shader compilation on Android
+                    cache: None,
+                })
         };
 
         Material {
@@ -209,5 +200,11 @@ impl MaterialBuilder {
             layouts: self.layouts.clone(),
             texture: self.texture.clone(),
         }
+    }
+}
+
+impl Default for MaterialBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }

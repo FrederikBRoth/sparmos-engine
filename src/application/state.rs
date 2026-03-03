@@ -1,12 +1,7 @@
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
-use std::{iter, vec};
+use std::sync::Arc;
+use std::vec;
 
-use cgmath::{Vector3, prelude::*};
-use egui_wgpu::ScreenDescriptor;
-use hecs::World;
-use wgpu::{Backend, ShaderModel, ShaderModule, SurfaceConfiguration};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
@@ -14,7 +9,6 @@ use winit::window::Window;
 use crate::application::gui::EguiRenderer;
 use crate::entity::core::engine::Engine;
 use crate::entity::core::render::GlobalRenderContext;
-use crate::entity::core::resource::{Resources, System};
 use crate::entity::texture::Texture;
 
 pub enum DeviceBackend {
@@ -218,17 +212,17 @@ impl State {
             self.surface_configured = false;
         }
     }
-    pub fn input(&mut self, event: &WindowEvent) {
-        // if let Some(game_loop) = self.game_loop.as_mut() {
-        //     game_loop.process_event(event, &self.size);
-        // }
-    }
-
-    pub fn update(&mut self, dt: std::time::Duration) {
-        // if let Some(game_loop) = self.game_loop.as_mut() {
-        //     game_loop.update(dt, &self.render_context);
-        // }
-    }
+    // pub fn input(&mut self, event: &WindowEvent) {
+    //     // if let Some(game_loop) = self.game_loop.as_mut() {
+    //     //     game_loop.process_event(event, &self.size);
+    //     // }
+    // }
+    //
+    // pub fn update(&mut self, dt: std::time::Duration) {
+    //     // if let Some(game_loop) = self.game_loop.as_mut() {
+    //     //     game_loop.update(dt, &self.render_context);
+    //     // }
+    // }
 
     pub fn render(&mut self, game: &mut Box<dyn Game>) -> Result<(), wgpu::SurfaceError> {
         if !self.surface_configured {
@@ -277,6 +271,8 @@ impl State {
 
         #[cfg(feature = "gui")]
         {
+            use egui_wgpu::ScreenDescriptor;
+
             let screen_descriptor = ScreenDescriptor {
                 size_in_pixels: [
                     self.core.render_context.config.width,

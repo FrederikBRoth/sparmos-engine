@@ -185,7 +185,7 @@ impl Texture {
         });
         let (bind_group_layout, bind_group) = create_bind_group_and_layout(device, &view, &sampler);
         Ok(Self {
-            label: label.unwrap_or_else(|| "image-texture").to_string(),
+            label: label.unwrap_or("image-texture").to_string(),
 
             texture,
             view,

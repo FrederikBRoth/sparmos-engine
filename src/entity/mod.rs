@@ -1,6 +1,5 @@
 pub mod core;
 pub mod entities;
-pub mod entity;
 pub mod primitive_texture;
 pub mod systems;
 pub mod texture;

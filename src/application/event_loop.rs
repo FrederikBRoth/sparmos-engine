@@ -2,13 +2,11 @@ use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
     event::*,
-    event_loop::{ActiveEventLoop, EventLoop},
+    event_loop::ActiveEventLoop,
     window::{Window, WindowId},
 };
 
 use crate::application::state::{Game, State};
-#[cfg(not(feature = "gui"))]
-use crate::{application::gui::EguiRenderer, entity::core::render::GlobalRenderContext};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -182,7 +180,7 @@ where
             self.is_focused = focused;
 
             if focused {
-                state.render(game.into()).unwrap();
+                state.render(game).unwrap();
 
                 self.last_time = web_time::Instant::now();
             }

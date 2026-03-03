@@ -130,8 +130,8 @@ pub struct Mesh {
 impl Mesh {
     pub fn new<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
         device: &wgpu::Device,
-        vertices: &Vec<T>,
-        indices: &Vec<u32>,
+        vertices: &[T],
+        indices: &[u32],
         vertex_count: u32,
 
         index_count: u32,

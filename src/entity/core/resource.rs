@@ -3,9 +3,7 @@ use std::{
     collections::HashMap,
 };
 
-use wgpu::{BindGroup, BindGroupLayout, naga::Type};
-
-use crate::entity::systems::{camera::CameraSystem, light::LightSystem};
+use wgpu::{BindGroup, BindGroupLayout};
 
 pub trait GpuBindable {
     fn get_bind_group_layout(&self) -> &BindGroupLayout;

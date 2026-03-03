@@ -1,5 +1,4 @@
 use hecs::{DynamicBundle, Entity, World};
-use wgpu::wgc::device::resource;
 
 use crate::entity::core::resource::{Resources, System};
 
