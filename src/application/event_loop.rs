@@ -42,7 +42,7 @@ where
     U: 'static,
 {
     pub fn new<G>(
-        #[cfg(target_arch = "wasm32")] event_loop: &EventLoop<UserEvent<U>>,
+        #[cfg(target_arch = "wasm32")] event_loop: &winit::event_loop::EventLoop<UserEvent<U>>,
         hooks: G,
         game_loop: impl Game + 'static,
     ) -> Self
@@ -204,7 +204,7 @@ where
             WindowEvent::RedrawRequested => {
                 let dt = self.last_time.elapsed();
                 self.last_time = web_time::Instant::now();
-
+                state.update(dt);
                 game.update(dt, &mut state.core);
 
                 state.render(game).unwrap();

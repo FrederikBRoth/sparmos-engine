@@ -3,12 +3,15 @@ use wgpu::{BindGroupLayout, RenderPipeline};
 
 use crate::entity::{
     core::{
-        geometry::Mesh, instance::InstanceController, render::GlobalRenderContext,
+        geometry::{Mesh, VertexBufferLayoutOwned},
+        instance::InstanceController,
+        render::RenderContext,
         resource::GpuBindable,
     },
     texture::Texture,
 };
 
+#[derive(Clone)]
 pub struct Material {
     pub pipeline: RenderPipeline,
     pub texture: Option<Texture>,
@@ -58,9 +61,9 @@ impl MaterialBuilder {
 
     pub fn build(
         &self,
-        mesh: &Mesh,
-        render_context: &GlobalRenderContext,
-        instance_controller: &InstanceController,
+        mesh: &VertexBufferLayoutOwned,
+        render_context: &RenderContext,
+        instance_controller: &VertexBufferLayoutOwned,
     ) -> Material {
         let bind_group_layouts: Vec<&BindGroupLayout> =
             self.layouts.iter().map(|(_, v)| v).collect();
@@ -85,10 +88,7 @@ impl MaterialBuilder {
                     vertex: wgpu::VertexState {
                         module: shader,
                         entry_point: Some("vs_main"),
-                        buffers: &[
-                            mesh.buffer_layout.to_wgpu(),
-                            instance_controller.buffer_layout.to_wgpu(),
-                        ],
+                        buffers: &[mesh.to_wgpu(), instance_controller.to_wgpu()],
                         compilation_options: Default::default(),
                     },
                     fragment: Some(wgpu::FragmentState {
@@ -121,7 +121,7 @@ impl MaterialBuilder {
                         bias: wgpu::DepthBiasState::default(),
                     }),
                     multisample: wgpu::MultisampleState {
-                        count: 2,
+                        count: 1,
                         mask: !0,
                         alpha_to_coverage_enabled: false,
                     },
@@ -146,10 +146,7 @@ impl MaterialBuilder {
                     vertex: wgpu::VertexState {
                         module: shader,
                         entry_point: Some("vs_main"),
-                        buffers: &[
-                            mesh.buffer_layout.to_wgpu(),
-                            instance_controller.buffer_layout.to_wgpu(),
-                        ],
+                        buffers: &[mesh.to_wgpu(), instance_controller.to_wgpu()],
                         compilation_options: Default::default(),
                     },
                     fragment: Some(wgpu::FragmentState {

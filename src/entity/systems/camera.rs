@@ -8,7 +8,7 @@ use winit::{
 
 use crate::{
     entity::core::{
-        render::GlobalRenderContext,
+        render::RenderContext,
         resource::{GpuBindable, System},
     },
     helpers::{animation::Linear, line_trace::OPENGL_TO_WGPU_MATRIX},
@@ -103,7 +103,9 @@ impl Camera {
             .project_screen_to_world(mouse_x, mouse_y, 0.0, screen_width, screen_height)
             .unwrap();
 
-        (Point3::from_vec(back), -(front - back).normalize())
+        let test = (Point3::from_vec(back), -(front - back).normalize());
+        println!("{:?}", test);
+        test
     }
 
     pub fn project_screen_to_world(
@@ -326,7 +328,7 @@ impl CameraSystem {
     pub fn update_camera(
         &mut self,
         dt: std::time::Duration,
-        rc: &GlobalRenderContext,
+        rc: &RenderContext,
         camera: &mut Camera,
     ) {
         let right: Vector3<f32> = camera.forward.cross(camera.up).normalize();

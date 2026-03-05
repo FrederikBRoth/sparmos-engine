@@ -3,24 +3,31 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
+use slotmap::{SlotMap, new_key_type};
 use wgpu::ShaderModule;
 
 use crate::{
-    application::state::DeviceBackend,
+    application::state::{Core, DeviceBackend},
     entity::{
-        core::{engine::Engine, geometry::Mesh, instance::InstanceController, material::Material},
+        core::{
+            engine::Engine,
+            geometry::Mesh,
+            instance::{InstanceController, InstanceToRaw},
+            material::Material,
+        },
         texture::TextureSampleView,
     },
 };
 
-pub struct GlobalRenderContext {
+pub struct RenderContext {
     pub depth_texture: TextureSampleView,
     pub shaders: HashMap<String, ShaderModule>,
     pub device: Arc<wgpu::Device>, // Logical GPU device
     pub queue: Arc<wgpu::Queue>,   // Command queue for GPU
     pub config: wgpu::SurfaceConfiguration,
+    pub gpu_objects: GpuObjects,
 }
-impl GlobalRenderContext {
+impl RenderContext {
     pub fn add_shader(&mut self, device: &wgpu::Device, label: &str, shader_path: &str) {
         let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(label),
@@ -29,35 +36,41 @@ impl GlobalRenderContext {
     }
 }
 
+pub struct Renderable {
+    pub material_handle: MaterialHandle,
+    pub mesh_handle: MeshHandle,
+    pub instance_controller_handle: InstanceControllerHandle,
+}
+
 impl<'a> DrawMesh for wgpu::RenderPass<'a> {
-    fn draw_scene(&mut self, _backend: &DeviceBackend, scene: &Scene, engine: &Engine) {
-        let render_items = scene.to_render_items();
+    fn draw_scene(&mut self, _backend: &DeviceBackend, core: &Core) {
+        let engine = &core.engine;
+        let scene = &core.render_context.gpu_objects;
         let mut bind_group_id = 0;
-        //binds all system bind groups
         for (_name, bind_group) in engine.resources.bind_groups.iter() {
             self.set_bind_group(bind_group_id, bind_group, &[]);
             bind_group_id += 1;
         }
-        for render_item in render_items {
-            self.set_pipeline(&render_item.material.pipeline);
-            if let Some(texture) = &render_item.material.texture {
+
+        for (renderable) in engine.world.query::<&Renderable>().iter() {
+            let mesh = &scene.meshes[renderable.mesh_handle];
+            let material = &scene.materials[renderable.material_handle];
+            let instance_controller =
+                &scene.instance_controllers[renderable.instance_controller_handle];
+            //binds all system bind groups
+            self.set_pipeline(&material.pipeline);
+            if let Some(texture) = &material.texture {
                 self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
             }
 
-            self.set_vertex_buffer(0, render_item.mesh.vertex_buffer.slice(..));
-            self.set_vertex_buffer(1, render_item.instance_controller.instance_buffer.slice(..));
-            self.set_index_buffer(
-                render_item.mesh.index_buffer.slice(..),
-                wgpu::IndexFormat::Uint32,
-            );
+            self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            self.set_vertex_buffer(1, instance_controller.instance_buffer.slice(..));
+            self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
             self.draw_indexed(
-                0..render_item.mesh.index_count,
+                0..mesh.index_count,
                 0,
-                0..render_item
-                    .instance_controller
-                    .atomic_usize
-                    .load(Ordering::Relaxed) as u32,
+                0..instance_controller.atomic_usize.load(Ordering::Relaxed) as u32,
             );
         }
     }
@@ -65,44 +78,41 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
 
 pub trait DrawMesh {
     #[allow(unused)]
-    fn draw_scene(&mut self, backend: &DeviceBackend, scene: &Scene, systems: &Engine);
+    fn draw_scene(&mut self, backend: &DeviceBackend, core: &Core);
+}
+new_key_type! { pub struct MeshHandle; }
+new_key_type! { pub struct MaterialHandle; }
+new_key_type! { pub struct InstanceControllerHandle; }
+
+pub struct GpuObjects {
+    pub instance_controllers: SlotMap<InstanceControllerHandle, InstanceController>,
+    pub materials: SlotMap<MaterialHandle, Material>,
+    pub meshes: SlotMap<MeshHandle, Mesh>,
 }
 
-pub struct Scene {
-    pub objects: Vec<RenderObject>,
+impl GpuObjects {
+    pub fn insert_ic(&mut self, ic: InstanceController) -> InstanceControllerHandle {
+        self.instance_controllers.insert(ic)
+    }
 }
 
-impl Default for Scene {
+impl Default for GpuObjects {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Scene {
+impl GpuObjects {
     pub fn new() -> Self {
-        Scene { objects: vec![] }
-    }
-    pub fn to_render_items(&self) -> Vec<RenderItem<'_>> {
-        let mut items = Vec::new();
-
-        for object in &self.objects {
-            items.push(RenderItem {
-                mesh: &object.mesh,
-                material: &object.material,
-                instance_controller: &object.instance_controller,
-            });
+        GpuObjects {
+            instance_controllers: SlotMap::with_key(),
+            materials: SlotMap::with_key(),
+            meshes: SlotMap::with_key(),
         }
-
-        items
     }
 }
 //The two structs below might look identical, but the render item is useful for the render pipeline
 //iterating through refences is faster if we need multi pass rendering for shados etc.
-pub struct RenderObject {
-    pub mesh: Mesh,
-    pub instance_controller: InstanceController,
-    pub material: Material,
-}
 //
 pub struct RenderItem<'a> {
     mesh: &'a Mesh,

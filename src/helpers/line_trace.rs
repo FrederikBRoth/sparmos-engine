@@ -1,3 +1,7 @@
+use cgmath::{InnerSpace, Point3, Vector2, Vector3};
+
+use crate::entity::core::geometry::PrimitiveVertex;
+
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
@@ -161,141 +165,54 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 //     closest_hit_index
 // }
 //
-// pub fn line_trace_square(
-//     state: &Vec<PrimitiveVertex>,
-//     bounds: Vector2<u32>,
-//     click_vector: (Point3<f32>, Vector3<f32>),
-//     filter: Option<Vec<usize>>,
-// ) -> Option<usize> {
-//     let origin = click_vector.0;
-//     //Notice negation of vector
-//     let direction = click_vector.1.normalize();
-//
-//     let mut closest_t = f32::INFINITY;
-//     let mut hit_square = None;
-//
-//     let start = bounds.x as usize;
-//     let end = bounds.y as usize;
-//
-//     // optional filter — could be used to skip certain quads
-//     if let Some(filter) = &filter {
-//         for &quad_idx in filter {
-//             // each quad is 4 vertices
-//             let base = start + quad_idx * 4;
-//             if base + 3 >= end {
-//                 // out of range, skip or handle error
-//                 continue;
-//             }
-//
-//             let vert0 = &state[base];
-//             let vert1 = &state[base + 1];
-//             let vert2 = &state[base + 2];
-//             let vert3 = &state[base + 3];
-//
-//             let origin = Vector3::new(origin.x, origin.y, origin.z);
-//             let scale = 25.0;
-//             for (verts, norms) in [
-//                 (
-//                     (
-//                         Vector3::from(vert0.position) * scale,
-//                         Vector3::from(vert1.position) * scale,
-//                         Vector3::from(vert2.position) * scale,
-//                     ),
-//                     (
-//                         vert0.normal.into(),
-//                         vert1.normal.into(),
-//                         vert2.normal.into(),
-//                     ),
-//                 ),
-//                 (
-//                     (
-//                         Vector3::from(vert0.position) * scale,
-//                         Vector3::from(vert2.position) * scale,
-//                         Vector3::from(vert3.position) * scale,
-//                     ),
-//                     (
-//                         vert0.normal.into(),
-//                         vert2.normal.into(),
-//                         vert3.normal.into(),
-//                     ),
-//                 ),
-//             ] {
-//                 let (v0, v1, v2) = verts;
-//                 let (n0, n1, n2): (Vector3<f32>, Vector3<f32>, Vector3<f32>) = norms;
-//
-//                 let avg_normal = (n0 + n1 + n2) / 3.0;
-//
-//                 if let Some((t, _)) = ray_intersects_triangle(origin, direction, v0, v1, v2) {
-//                     if avg_normal.dot(direction) > 0.0 {
-//                         continue; // backface
-//                     }
-//
-//                     if t < closest_t {
-//                         closest_t = t;
-//                         hit_square = Some(quad_idx);
-//                     }
-//                 }
-//             }
-//             // do something with these 4 vertices
-//         }
-//     } else {
-//         // no filter, iterate all quads
-//         for (index, quad) in state[start..end].chunks_exact(4).enumerate() {
-//             let vert0 = &quad[0];
-//             let vert1 = &quad[1];
-//             let vert2 = &quad[2];
-//             let vert3 = &quad[3];
-//
-//             let origin = Vector3::new(origin.x, origin.y, origin.z);
-//             let scale = 25.0;
-//             for (verts, norms) in [
-//                 (
-//                     (
-//                         Vector3::from(vert0.position) * scale,
-//                         Vector3::from(vert1.position) * scale,
-//                         Vector3::from(vert2.position) * scale,
-//                     ),
-//                     (
-//                         vert0.normal.into(),
-//                         vert1.normal.into(),
-//                         vert2.normal.into(),
-//                     ),
-//                 ),
-//                 (
-//                     (
-//                         Vector3::from(vert0.position) * scale,
-//                         Vector3::from(vert2.position) * scale,
-//                         Vector3::from(vert3.position) * scale,
-//                     ),
-//                     (
-//                         vert0.normal.into(),
-//                         vert2.normal.into(),
-//                         vert3.normal.into(),
-//                     ),
-//                 ),
-//             ] {
-//                 let (v0, v1, v2) = verts;
-//                 let (n0, n1, n2): (Vector3<f32>, Vector3<f32>, Vector3<f32>) = norms;
-//
-//                 let avg_normal = (n0 + n1 + n2) / 3.0;
-//
-//                 if let Some((t, _)) = ray_intersects_triangle(origin, direction, v0, v1, v2) {
-//                     if avg_normal.dot(direction) > 0.0 {
-//                         continue; // backface
-//                     }
-//
-//                     if t < closest_t {
-//                         closest_t = t;
-//                         hit_square = Some(index);
-//                     }
-//                 }
-//             }
-//             // do something with these
-//         }
-//     }
-//
-//     hit_square
-// }
+pub fn line_trace_square(
+    vertices: &[PrimitiveVertex],
+    click_vector: (Point3<f32>, Vector3<f32>),
+    filter: Option<&[u32]>,
+) -> Option<u32> {
+    let ray_origin = Vector3::new(click_vector.0.x, click_vector.0.y, click_vector.0.z);
+    let ray_dir = click_vector.1.normalize();
+
+    let mut closest_t = f32::INFINITY;
+    let mut hit_quad: Option<u32> = None;
+
+    let scale = 20.0;
+
+    for quad in vertices.chunks_exact(4) {
+        let quad_id = quad[0].quad_id;
+
+        // Optional filter
+        if let Some(filter_ids) = filter {
+            if !filter_ids.contains(&quad_id) {
+                continue;
+            }
+        }
+
+        let v0 = Vector3::from(quad[0].position) * scale;
+        let v1 = Vector3::from(quad[1].position) * scale;
+        let v2 = Vector3::from(quad[2].position) * scale;
+        let v3 = Vector3::from(quad[3].position) * scale;
+
+        // Two triangles per quad
+        let triangles = [(v0, v1, v2), (v0, v2, v3)];
+
+        for (a, b, c) in triangles {
+            if let Some((t, normal)) = ray_intersects_triangle(ray_origin, ray_dir, a, b, c) {
+                // Backface culling
+                if normal.dot(ray_dir) > 0.0 {
+                    continue;
+                }
+
+                if t < closest_t {
+                    closest_t = t;
+                    hit_quad = Some(quad_id);
+                }
+            }
+        }
+    }
+
+    hit_quad
+}
 // pub fn ray_aabb_intersect(
 //     origin: Point3<f32>,
 //     dir: Vector3<f32>,
@@ -339,52 +256,52 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 //     Some(if tmin >= 0.0 { tmin } else { tmax }) // Return positive distance
 // }
 //
-// fn ray_intersects_triangle(
-//     ray_origin: Vector3<f32>,
-//     ray_dir: Vector3<f32>,
-//     v0: Vector3<f32>,
-//     v1: Vector3<f32>,
-//     v2: Vector3<f32>,
-// ) -> Option<(f32, Vector3<f32>)> {
-//     let epsilon = 1e-8;
-//     let edge1 = v1 - v0;
-//     let edge2 = v2 - v0;
-//     let h = ray_dir.cross(edge2);
-//     let a = edge1.dot(h);
-//
-//     // Skip if ray nearly parallel to triangle
-//     if a.abs() < epsilon {
-//         return None;
-//     }
-//
-//     let f = 1.0 / a;
-//     let s = ray_origin - v0;
-//     let u = f * s.dot(h);
-//     if !(0.0..=1.0).contains(&u) {
-//         return None;
-//     }
-//
-//     let q = s.cross(edge1);
-//     let v = f * ray_dir.dot(q);
-//     if v < 0.0 || u + v > 1.0 {
-//         return None;
-//     }
-//
-//     let t = f * edge2.dot(q);
-//     if t <= epsilon {
-//         return None;
-//     }
-//
-//     // Compute the geometric normal
-//     let mut normal = edge1.cross(edge2).normalize();
-//
-//     // Flip so it always faces against the ray direction
-//     if normal.dot(ray_dir) > 0.0 {
-//         normal = -normal;
-//     }
-//
-//     Some((t, normal))
-// }
+fn ray_intersects_triangle(
+    ray_origin: Vector3<f32>,
+    ray_dir: Vector3<f32>,
+    v0: Vector3<f32>,
+    v1: Vector3<f32>,
+    v2: Vector3<f32>,
+) -> Option<(f32, Vector3<f32>)> {
+    let epsilon = 1e-8;
+    let edge1 = v1 - v0;
+    let edge2 = v2 - v0;
+    let h = ray_dir.cross(edge2);
+    let a = edge1.dot(h);
+
+    // Skip if ray nearly parallel to triangle
+    if a.abs() < epsilon {
+        return None;
+    }
+
+    let f = 1.0 / a;
+    let s = ray_origin - v0;
+    let u = f * s.dot(h);
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+
+    let q = s.cross(edge1);
+    let v = f * ray_dir.dot(q);
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+
+    let t = f * edge2.dot(q);
+    if t <= epsilon {
+        return None;
+    }
+
+    // Compute the geometric normal
+    let mut normal = edge1.cross(edge2).normalize();
+
+    // Flip so it always faces against the ray direction
+    if normal.dot(ray_dir) > 0.0 {
+        normal = -normal;
+    }
+
+    Some((t, normal))
+}
 // pub fn aabb_sphere_intersect(
 //     aabb_min: Vector3<f32>,
 //     aabb_max: Vector3<f32>,

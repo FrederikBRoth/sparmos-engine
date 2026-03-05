@@ -76,6 +76,16 @@ impl Default for Instance {
         }
     }
 }
+
+impl Instance {
+    pub fn new(position: cgmath::Vector3<f32>, scale: f32) -> Self {
+        Self {
+            position,
+            scale,
+            ..Default::default()
+        }
+    }
+}
 pub trait InstanceToRaw {
     fn desc() -> VertexBufferLayoutOwned;
     fn to_raw(instance: &Instance) -> Self;

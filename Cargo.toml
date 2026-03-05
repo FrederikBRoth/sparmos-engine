@@ -26,6 +26,7 @@ egui-wgpu = { version = "0.33", features = ["winit"] }
 egui-winit = { version = "0.33", default-features = false }
 indexmap = "2.13"
 hecs = "0.11"
+slotmap = "1.1"
 
 [dependencies.image]
 version = "0.25"

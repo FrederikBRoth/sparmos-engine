@@ -8,7 +8,7 @@ use winit::window::Window;
 
 use crate::application::gui::EguiRenderer;
 use crate::entity::core::engine::Engine;
-use crate::entity::core::render::GlobalRenderContext;
+use crate::entity::core::render::{DrawMesh, GpuObjects, RenderContext};
 use crate::entity::texture::Texture;
 
 pub enum DeviceBackend {
@@ -17,7 +17,7 @@ pub enum DeviceBackend {
 }
 pub struct Core {
     pub engine: Engine,
-    pub render_context: GlobalRenderContext,
+    pub render_context: RenderContext,
 }
 
 pub struct State {
@@ -158,12 +158,13 @@ impl State {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        let render_context = GlobalRenderContext {
+        let render_context = RenderContext {
             depth_texture: Texture::create_depth_texture(&device, &size, "depth_texture_primitive"),
             shaders: HashMap::new(),
             device: Arc::clone(&device),
             queue,
             config,
+            gpu_objects: GpuObjects::new(),
         };
         let egui_renderer = EguiRenderer::new(&device, surface_format, None, 1, &window);
         let core = Core {
@@ -218,11 +219,21 @@ impl State {
     //     // }
     // }
     //
-    // pub fn update(&mut self, dt: std::time::Duration) {
-    //     // if let Some(game_loop) = self.game_loop.as_mut() {
-    //     //     game_loop.update(dt, &self.render_context);
-    //     // }
-    // }
+    pub fn update(&mut self, dt: std::time::Duration) {
+        for (_, ic) in self
+            .core
+            .render_context
+            .gpu_objects
+            .instance_controllers
+            .iter_mut()
+        {
+            ic.update(&self.core.render_context.queue);
+        }
+
+        // if let Some(game_loop) = self.game_loop.as_mut() {
+        //     game_loop.update(dt, &self.render_context);
+        // }
+    }
 
     pub fn render(&mut self, game: &mut Box<dyn Game>) -> Result<(), wgpu::SurfaceError> {
         if !self.surface_configured {
@@ -265,6 +276,8 @@ impl State {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+
+            render_pass.draw_scene(&self.backend, &self.core);
 
             game.render(&mut render_pass, &view, &self.backend, &mut self.core);
         }

@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
 };
 
+use indexmap::IndexMap;
 use wgpu::{BindGroup, BindGroupLayout};
 
 pub trait GpuBindable {
@@ -16,7 +17,7 @@ pub trait System {
 
 pub struct Resources {
     //For quick bind_group reading, that avoids vtable lookups
-    pub bind_groups: HashMap<TypeId, wgpu::BindGroup>,
+    pub bind_groups: IndexMap<TypeId, wgpu::BindGroup>,
     resource_map: HashMap<TypeId, Box<dyn Any>>,
 }
 
@@ -42,7 +43,7 @@ impl Resources {
     }
     pub fn new() -> Self {
         Resources {
-            bind_groups: HashMap::new(),
+            bind_groups: IndexMap::new(),
             resource_map: HashMap::new(),
         }
     }
