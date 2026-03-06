@@ -62,9 +62,9 @@ impl Camera {
             yaw: 111.0,
             pitch: 1.0,
             aspect: screen_size.width / screen_size.height,
-            fovy: 25.0,
+            fovy: 90.0,
             znear: 0.1,
-            zfar: 100.0,
+            zfar: 5000.0,
             // camera_animator: CameraAnimator {
             //     animating: false,
             //     time: 0.0,
@@ -104,7 +104,7 @@ impl Camera {
             .unwrap();
 
         let test = (Point3::from_vec(back), -(front - back).normalize());
-        println!("{:?}", test);
+        // println!("{:?}", test);
         test
     }
 

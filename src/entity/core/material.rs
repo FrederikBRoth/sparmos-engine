@@ -1,8 +1,10 @@
 use indexmap::IndexMap;
+use slotmap::{SlotMap, new_key_type};
 use wgpu::{BindGroupLayout, RenderPipeline};
 
 use crate::entity::{
     core::{
+        buffer::Buffer,
         geometry::{Mesh, VertexBufferLayoutOwned},
         instance::InstanceController,
         render::RenderContext,
@@ -16,10 +18,14 @@ pub struct Material {
     pub pipeline: RenderPipeline,
     pub texture: Option<Texture>,
     pub layouts: IndexMap<String, BindGroupLayout>,
+    pub buffers: IndexMap<u32, Buffer>,
 }
 
+new_key_type! { pub struct BufferHandle; }
 pub struct MaterialBuilder {
     layouts: IndexMap<String, BindGroupLayout>,
+    buffers: IndexMap<u32, Buffer>,
+
     texture: Option<Texture>,
     shader: String,
 }
@@ -28,6 +34,7 @@ impl MaterialBuilder {
     pub fn new() -> Self {
         MaterialBuilder {
             layouts: IndexMap::new(),
+            buffers: IndexMap::new(),
             texture: None,
             shader: String::new(),
         }
@@ -50,6 +57,11 @@ impl MaterialBuilder {
         self
     }
 
+    pub fn add_buffer(&mut self, handle: u32, buffer: Buffer) -> &mut Self {
+        self.buffers.insert(handle, buffer);
+        self
+    }
+
     pub fn add_texture(&mut self, texture: Texture) -> &mut Self {
         self.layouts.insert(
             texture.label.clone(),
@@ -65,8 +77,11 @@ impl MaterialBuilder {
         render_context: &RenderContext,
         instance_controller: &VertexBufferLayoutOwned,
     ) -> Material {
-        let bind_group_layouts: Vec<&BindGroupLayout> =
+        let mut bind_group_layouts: Vec<&BindGroupLayout> =
             self.layouts.iter().map(|(_, v)| v).collect();
+        for buffer in self.buffers.values() {
+            bind_group_layouts.push(&buffer.bind_group_layout);
+        }
         let shader = render_context.shaders.get(&self.shader).unwrap();
         //First check is if a texture was passed to the material. If it was, do a textured pipeline, if
         //not go primitive
@@ -196,6 +211,8 @@ impl MaterialBuilder {
             pipeline,
             layouts: self.layouts.clone(),
             texture: self.texture.clone(),
+            //TODO FIX
+            buffers: self.buffers.clone(),
         }
     }
 }

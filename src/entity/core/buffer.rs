@@ -11,6 +11,7 @@ pub enum BufferType {
     StorageBuffer,
     UniformBuffer,
 }
+#[derive(Clone)]
 pub struct Buffer {
     pub buffer: wgpu::Buffer,
     pub bind_group_layout: wgpu::BindGroupLayout,
@@ -45,6 +46,14 @@ impl Buffer {
         };
         buffer.bind_group = Some(bind_group);
         buffer
+    }
+
+    pub fn update<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        &self,
+        queue: &wgpu::Queue,
+        instance: &[T],
+    ) {
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(instance));
     }
 
     pub fn new_layout<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(

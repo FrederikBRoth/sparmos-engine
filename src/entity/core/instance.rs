@@ -1,5 +1,7 @@
 use std::sync::{Arc, atomic::AtomicUsize};
 
+use cgmath::Rotation3;
+
 use crate::entity::core::geometry::VertexBufferLayoutOwned;
 
 #[derive(Clone)]
@@ -66,8 +68,11 @@ impl Default for Instance {
     fn default() -> Self {
         Self {
             index: 0,
-            position: cgmath::Vector3::new(1.0, 1.0, 1.0),
-            rotation: cgmath::Quaternion::new(1.0, 1.0, 1.0, 1.0), // Identity rotation
+            position: cgmath::Vector3::new(0.0, 0.0, 0.0),
+            rotation: cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_z(),
+                cgmath::Deg(0.0),
+            ), // Identity rotation
             should_render: true,
             scale: 20.0,
             color: cgmath::Vector3::new(1.0, 1.0, 1.0), // white

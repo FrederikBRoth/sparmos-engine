@@ -61,6 +61,11 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             self.set_pipeline(&material.pipeline);
             if let Some(texture) = &material.texture {
                 self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
+                bind_group_id += 1;
+            }
+
+            for buffers in &material.buffers {
+                self.set_bind_group(bind_group_id, &buffers.1.bind_group, &[]);
             }
 
             self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));

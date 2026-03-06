@@ -195,7 +195,7 @@ where
             .egui_renderer
             .handle_input(state.window.as_ref(), &event)
         {
-            game.process_event(&event, &state.size, &mut state.core);
+            // game.process_event(&event, &state.size, &mut state.core);
         }
 
         match event {
