@@ -180,7 +180,7 @@ where
             self.is_focused = focused;
 
             if focused {
-                state.render(game).unwrap();
+                state.render(game);
 
                 self.last_time = web_time::Instant::now();
             }
@@ -207,7 +207,7 @@ where
                 state.update(dt);
                 game.update(dt, &mut state.core);
 
-                state.render(game).unwrap();
+                state.render(game);
             }
 
             WindowEvent::Resized(size) => {

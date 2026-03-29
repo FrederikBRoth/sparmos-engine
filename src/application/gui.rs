@@ -106,6 +106,7 @@ impl EguiRenderer {
             timestamp_writes: None,
             label: Some("egui main render pass"),
             occlusion_query_set: None,
+            ..Default::default()
         });
 
         self.renderer

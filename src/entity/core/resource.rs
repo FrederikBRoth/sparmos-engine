@@ -26,7 +26,7 @@ impl Resources {
         self.bind_groups.get(&TypeId::of::<T>())
     }
 
-    pub fn get_resource<T: 'static>(&self) -> &T {
+    pub fn get_system<T: 'static>(&self) -> &T {
         self.resource_map
             .get(&TypeId::of::<T>())
             .unwrap()
@@ -34,7 +34,7 @@ impl Resources {
             .unwrap()
     }
 
-    pub fn get_resource_mut<T: 'static>(&mut self) -> &mut T {
+    pub fn get_system_mut<T: 'static>(&mut self) -> &mut T {
         self.resource_map
             .get_mut(&TypeId::of::<T>())
             .unwrap()

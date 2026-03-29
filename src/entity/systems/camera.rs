@@ -11,7 +11,7 @@ use crate::{
         render::RenderContext,
         resource::{GpuBindable, System},
     },
-    helpers::{animation::Linear, line_trace::OPENGL_TO_WGPU_MATRIX},
+    helpers::line_trace::OPENGL_TO_WGPU_MATRIX,
 };
 
 pub struct CameraAnimator {
@@ -28,7 +28,7 @@ pub struct CameraAnimator {
 
 impl CameraAnimator {
     pub fn lerp(&self) -> (Point3<f32>, Point3<f32>) {
-        let lerp_value = Linear::ease_linear(self.time);
+        let lerp_value = self.time.clamp(0.0, 1.0);
         let eye_anim = self.start_eye + (self.end_eye - self.start_eye) * lerp_value;
         let target_anim = self.start_target + (self.end_target - self.start_target) * lerp_value;
         (eye_anim, target_anim)

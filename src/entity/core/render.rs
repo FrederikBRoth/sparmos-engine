@@ -12,7 +12,7 @@ use crate::{
         core::{
             engine::Engine,
             geometry::Mesh,
-            instance::{InstanceController, InstanceToRaw},
+            instance::{InstanceController, InstanceControllerTrait, InstanceToRaw},
             material::Material,
         },
         texture::TextureSampleView,
@@ -69,13 +69,13 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             }
 
             self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            self.set_vertex_buffer(1, instance_controller.instance_buffer.slice(..));
+            self.set_vertex_buffer(1, instance_controller.buffer().slice(..));
             self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
             self.draw_indexed(
                 0..mesh.index_count,
                 0,
-                0..instance_controller.atomic_usize.load(Ordering::Relaxed) as u32,
+                0..instance_controller.count() as u32,
             );
         }
     }
@@ -90,13 +90,13 @@ new_key_type! { pub struct MaterialHandle; }
 new_key_type! { pub struct InstanceControllerHandle; }
 
 pub struct GpuObjects {
-    pub instance_controllers: SlotMap<InstanceControllerHandle, InstanceController>,
+    pub instance_controllers: SlotMap<InstanceControllerHandle, Box<dyn InstanceControllerTrait>>,
     pub materials: SlotMap<MaterialHandle, Material>,
     pub meshes: SlotMap<MeshHandle, Mesh>,
 }
 
 impl GpuObjects {
-    pub fn insert_ic(&mut self, ic: InstanceController) -> InstanceControllerHandle {
+    pub fn insert_ic(&mut self, ic: Box<dyn InstanceControllerTrait>) -> InstanceControllerHandle {
         self.instance_controllers.insert(ic)
     }
 }
@@ -121,6 +121,6 @@ impl GpuObjects {
 //
 pub struct RenderItem<'a> {
     mesh: &'a Mesh,
-    instance_controller: &'a InstanceController,
+    instance_controller: &'a Box<dyn InstanceControllerTrait>,
     material: &'a Material,
 }

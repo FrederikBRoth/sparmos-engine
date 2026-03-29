@@ -1,54 +1,137 @@
-use std::sync::{Arc, atomic::AtomicUsize};
+use std::sync::{Arc, Mutex, RwLock, atomic::AtomicUsize};
 
 use cgmath::Rotation3;
 
 use crate::entity::core::geometry::VertexBufferLayoutOwned;
 
 #[derive(Clone)]
-pub struct InstanceController {
-    pub instances: Vec<Instance>,
-    pub offset: usize, // Where in the big instance buffer this mesh's data starts
-    pub count: usize,
+pub struct InstanceController<T>
+where
+    T: InstanceToRaw + bytemuck::Pod + Send + Sync + 'static,
+{
+    pub instances: Arc<RwLock<Vec<Instance>>>,
+    pub pending: Arc<Mutex<Vec<T>>>, // ✅ NO Option, NO realloc
+    pub offset: usize,
     pub atomic_usize: Arc<AtomicUsize>,
     pub buffer_layout: VertexBufferLayoutOwned,
     pub instance_buffer: wgpu::Buffer,
 }
-impl InstanceController {
-    pub fn new<T: InstanceToRaw + Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
-        instances: Vec<Instance>,
-        device: &wgpu::Device,
-    ) -> InstanceController {
-        let len = instances
-            .clone()
-            .iter()
-            .filter(|instance| instance.should_render)
-            .map(T::to_raw)
-            .collect::<Vec<_>>()
-            .len();
+impl<T> InstanceController<T>
+where
+    T: InstanceToRaw + bytemuck::Pod + Send + Sync + 'static,
+{
+    pub fn new(instances: Vec<Instance>, device: &wgpu::Device) -> Self {
+        let mut raw = Vec::with_capacity(instances.len());
+
+        raw.extend(instances.iter().filter(|i| i.should_render).map(T::to_raw));
+
+        let len = raw.len();
+
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Global Instance Buffer"),
-            size: (len * std::mem::size_of::<T>()) as u64,
+            label: Some("Instance Buffer"),
+            size: (instances.len() * std::mem::size_of::<T>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        InstanceController {
-            instances: instances.clone(),
+
+        Self {
+            instances: Arc::new(RwLock::new(instances)),
+            pending: Arc::new(Mutex::new(raw)),
             offset: 0,
             atomic_usize: Arc::new(AtomicUsize::new(len)),
-            count: len,
-            instance_buffer,
             buffer_layout: T::desc(),
+            instance_buffer,
         }
     }
+}
+pub trait InstanceControllerTrait: Send + Sync {
+    fn update(&self, queue: &wgpu::Queue);
 
-    pub fn update(&mut self, queue: &wgpu::Queue) {
-        let all_instances_raw: Vec<InstanceRaw> =
-            self.instances.iter().map(InstanceRaw::to_raw).collect();
-        queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&all_instances_raw),
-        );
+    fn buffer(&self) -> &wgpu::Buffer;
+    fn layout(&self) -> &VertexBufferLayoutOwned;
+
+    fn count(&self) -> usize;
+    fn instances(&self) -> std::sync::RwLockReadGuard<'_, Vec<Instance>>;
+    fn instances_mut(&self) -> std::sync::RwLockWriteGuard<'_, Vec<Instance>>;
+}
+impl<T> InstanceControllerTrait for InstanceController<T>
+where
+    T: InstanceToRaw + bytemuck::Pod + Send + Sync + 'static,
+{
+    fn update(&self, queue: &wgpu::Queue) {
+        let pending = Arc::clone(&self.pending);
+        let instances = Arc::clone(&self.instances);
+        let count_clone = Arc::clone(&self.atomic_usize);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        std::thread::spawn(move || {
+            let mut pending = pending.lock().unwrap();
+
+            pending.clear();
+            pending.extend(
+                instances
+                    .read()
+                    .unwrap()
+                    .iter()
+                    .filter(|i| i.should_render)
+                    .map(T::to_raw),
+            );
+
+            count_clone.store(pending.len(), std::sync::atomic::Ordering::Relaxed);
+        });
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen_futures::spawn_local;
+
+            spawn_local(async move {
+                let mut pending = pending.lock().unwrap();
+
+                pending.clear();
+                pending.extend(
+                    instances
+                        .read()
+                        .unwrap()
+                        .iter()
+                        .filter(|i| i.should_render)
+                        .map(T::to_raw),
+                );
+
+                count_clone.store(pending.len(), std::sync::atomic::Ordering::Relaxed);
+            });
+        }
+
+        let pending = self.pending.lock().unwrap();
+
+        let chunk_size = 10_000;
+        let stride = std::mem::size_of::<T>();
+
+        for (i, chunk) in pending.chunks(chunk_size).enumerate() {
+            queue.write_buffer(
+                &self.instance_buffer,
+                (i * chunk_size * stride) as u64,
+                bytemuck::cast_slice(chunk),
+            );
+        }
+    }
+    fn buffer(&self) -> &wgpu::Buffer {
+        &self.instance_buffer
+    }
+
+    fn layout(&self) -> &VertexBufferLayoutOwned {
+        &self.buffer_layout
+    }
+
+    fn count(&self) -> usize {
+        self.atomic_usize.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn instances(&self) -> std::sync::RwLockReadGuard<'_, Vec<Instance>> {
+        self.instances.read().unwrap()
+    }
+
+    fn instances_mut(&self) -> std::sync::RwLockWriteGuard<'_, Vec<Instance>> {
+        self.instances.write().unwrap()
     }
 }
 
@@ -94,6 +177,56 @@ impl Instance {
 pub trait InstanceToRaw {
     fn desc() -> VertexBufferLayoutOwned;
     fn to_raw(instance: &Instance) -> Self;
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuInstance {
+    pub position: [f32; 3],
+    pub scale: f32,
+    pub rotation: [f32; 4], // quaternion
+    pub color: [f32; 3],
+    _pad: f32, // alignment (important!)
+}
+
+impl InstanceToRaw for GpuInstance {
+    fn desc() -> VertexBufferLayoutOwned {
+        use std::mem;
+
+        VertexBufferLayoutOwned {
+            array_stride: mem::size_of::<GpuInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: vec![
+                // position + scale
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                // rotation quaternion
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 4]>() as _,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                // color
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 8]>() as _,
+                    shader_location: 7,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+            ],
+        }
+    }
+
+    fn to_raw(instance: &Instance) -> Self {
+        GpuInstance {
+            position: instance.position.into(),
+            scale: instance.scale,
+            rotation: instance.rotation.into(), // must be quaternion
+            color: instance.color.into(),
+            _pad: 0.0,
+        }
+    }
 }
 
 #[repr(C)]

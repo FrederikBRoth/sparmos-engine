@@ -1,15 +1,18 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
+use wgpu::{CurrentSurfaceTexture, InstanceDescriptor};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
 use crate::application::gui::EguiRenderer;
 use crate::entity::core::engine::Engine;
-use crate::entity::core::render::{DrawMesh, GpuObjects, RenderContext};
+use crate::entity::core::render::{self, DrawMesh, GpuObjects, RenderContext, Renderable};
 use crate::entity::texture::Texture;
+use crate::helpers::animation::AnimationHandler;
 
 pub enum DeviceBackend {
     WebGL,
@@ -18,6 +21,7 @@ pub enum DeviceBackend {
 pub struct Core {
     pub engine: Engine,
     pub render_context: RenderContext,
+    pub args: HashMap<String, Box<dyn Any>>,
 }
 
 pub struct State {
@@ -33,14 +37,6 @@ pub struct State {
     pub core: Core,
 }
 pub trait Game {
-    fn render(
-        &mut self,
-        render: &mut wgpu::RenderPass,
-        texture_view: &wgpu::TextureView,
-        backend: &DeviceBackend,
-        core: &mut Core,
-    );
-
     fn update(&mut self, dt: std::time::Duration, core: &mut Core);
 
     fn process_event(&mut self, event: &WindowEvent, screen: &PhysicalSize<u32>, core: &mut Core);
@@ -59,12 +55,12 @@ impl State {
         let size = window.inner_size();
 
         // Create a new GPU instance
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
             #[cfg(target_arch = "wasm32")]
             backends: wgpu::Backends::BROWSER_WEBGPU,
-            ..Default::default()
+            ..InstanceDescriptor::new_without_display_handle()
         });
 
         // Create surface linked to window
@@ -91,9 +87,9 @@ impl State {
                 log::warn!("WebGPU unavailable, falling back to WebGL");
 
                 // Recreate instance forcing GL backend
-                let gl_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+                let gl_instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                     backends: wgpu::Backends::GL,
-                    ..Default::default()
+                    ..InstanceDescriptor::new_without_display_handle()
                 });
 
                 let gl_surface = gl_instance.create_surface(window.clone()).unwrap();
@@ -170,6 +166,7 @@ impl State {
         let core = Core {
             engine: Engine::default(),
             render_context,
+            args: HashMap::new(),
         };
         Self {
             surface,
@@ -221,100 +218,124 @@ impl State {
     // }
     //
     pub fn update(&mut self, dt: std::time::Duration) {
-        for (_, ic) in self
-            .core
-            .render_context
-            .gpu_objects
-            .instance_controllers
-            .iter_mut()
         {
-            ic.update(&self.core.render_context.queue);
-        }
+            let mut query = self
+                .core
+                .engine
+                .world
+                .query::<(&Renderable, &mut AnimationHandler)>();
+            for (renderable, ah) in query.iter() {
+                // ah.animate(dt.as_secs_f32());
+                let ic = self
+                    .core
+                    .render_context
+                    .gpu_objects
+                    .instance_controllers
+                    .get_mut(renderable.instance_controller_handle)
+                    .unwrap();
 
-        // if let Some(game_loop) = self.game_loop.as_mut() {
-        //     game_loop.update(dt, &self.render_context);
-        // }
+                ah.update(dt.as_secs_f32(), ic.instances_mut().as_mut());
+            }
+        }
+        {
+            let mut query = self.core.engine.world.query::<&Renderable>();
+            for renderable in query.iter() {
+                self.core
+                    .render_context
+                    .gpu_objects
+                    .instance_controllers
+                    .get_mut(renderable.instance_controller_handle)
+                    .unwrap()
+                    .update(&self.core.render_context.queue);
+            }
+        }
     }
 
-    pub fn render(&mut self, game: &mut Box<dyn Game>) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, game: &mut Box<dyn Game>) {
         if !self.surface_configured {
-            return Ok(());
+            return;
         }
 
         self.window.request_redraw();
 
-        let output = self.surface.get_current_texture()?;
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        match self.surface.get_current_texture() {
+            CurrentSurfaceTexture::Success(surface_texture) => {
+                let view = surface_texture
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self.core.render_context.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            },
-        );
-
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
+                let mut encoder = self.core.render_context.device.create_command_encoder(
+                    &wgpu::CommandEncoderDescriptor {
+                        label: Some("Render Encoder"),
                     },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.core.render_context.depth_texture.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
+                );
 
-            render_pass.draw_scene(&self.backend, &self.core);
+                {
+                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Render Pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.core.render_context.depth_texture.view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                        ..Default::default()
+                    });
 
-            game.render(&mut render_pass, &view, &self.backend, &mut self.core);
+                    render_pass.draw_scene(&self.backend, &self.core);
+                }
+
+                #[cfg(feature = "gui")]
+                {
+                    use egui_wgpu::ScreenDescriptor;
+
+                    let screen_descriptor = ScreenDescriptor {
+                        size_in_pixels: [
+                            self.core.render_context.config.width,
+                            self.core.render_context.config.height,
+                        ],
+                        pixels_per_point: self.window.scale_factor() as f32,
+                    };
+
+                    self.egui_renderer.begin_frame(&self.window);
+                    game.gui_setup(&self.egui_renderer);
+                    self.egui_renderer.end_frame_and_draw(
+                        &self.core.render_context.device,
+                        &self.core.render_context.queue,
+                        &mut encoder,
+                        &self.window,
+                        &view,
+                        screen_descriptor,
+                    );
+                }
+
+                self.core
+                    .render_context
+                    .queue
+                    .submit(std::iter::once(encoder.finish()));
+
+                surface_texture.present();
+            }
+            CurrentSurfaceTexture::Suboptimal(surface_texture) => (),
+            CurrentSurfaceTexture::Timeout => (),
+            CurrentSurfaceTexture::Occluded => (),
+            CurrentSurfaceTexture::Outdated => (),
+            CurrentSurfaceTexture::Lost => (),
+            CurrentSurfaceTexture::Validation => (),
         }
-
-        #[cfg(feature = "gui")]
-        {
-            use egui_wgpu::ScreenDescriptor;
-
-            let screen_descriptor = ScreenDescriptor {
-                size_in_pixels: [
-                    self.core.render_context.config.width,
-                    self.core.render_context.config.height,
-                ],
-                pixels_per_point: self.window.scale_factor() as f32,
-            };
-
-            self.egui_renderer.begin_frame(&self.window);
-            game.gui_setup(&self.egui_renderer);
-            self.egui_renderer.end_frame_and_draw(
-                &self.core.render_context.device,
-                &self.core.render_context.queue,
-                &mut encoder,
-                &self.window,
-                &view,
-                screen_descriptor,
-            );
-        }
-
-        self.core
-            .render_context
-            .queue
-            .submit(std::iter::once(encoder.finish()));
-
-        output.present();
-
-        Ok(())
     }
 }
 

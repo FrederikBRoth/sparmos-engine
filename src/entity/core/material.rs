@@ -77,10 +77,10 @@ impl MaterialBuilder {
         render_context: &RenderContext,
         instance_controller: &VertexBufferLayoutOwned,
     ) -> Material {
-        let mut bind_group_layouts: Vec<&BindGroupLayout> =
-            self.layouts.iter().map(|(_, v)| v).collect();
+        let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> =
+            self.layouts.iter().map(|(_, v)| Some(v)).collect();
         for buffer in self.buffers.values() {
-            bind_group_layouts.push(&buffer.bind_group_layout);
+            bind_group_layouts.push(Some(&buffer.bind_group_layout));
         }
         let shader = render_context.shaders.get(&self.shader).unwrap();
         //First check is if a texture was passed to the material. If it was, do a textured pipeline, if
@@ -92,7 +92,7 @@ impl MaterialBuilder {
                     .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: Some("Render Pipeline Layout"),
                         bind_group_layouts: &bind_group_layouts,
-                        push_constant_ranges: &[],
+                        ..Default::default() // push_constant_ranges: &[],
                     });
 
             render_context
@@ -130,8 +130,8 @@ impl MaterialBuilder {
                     },
                     depth_stencil: Some(wgpu::DepthStencilState {
                         format: Texture::DEPTH_FORMAT,
-                        depth_write_enabled: true,
-                        depth_compare: wgpu::CompareFunction::Less,
+                        depth_write_enabled: Some(true),
+                        depth_compare: Some(wgpu::CompareFunction::Less),
                         stencil: wgpu::StencilState::default(),
                         bias: wgpu::DepthBiasState::default(),
                     }),
@@ -140,7 +140,7 @@ impl MaterialBuilder {
                         mask: !0,
                         alpha_to_coverage_enabled: false,
                     },
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 })
         } else {
@@ -150,7 +150,7 @@ impl MaterialBuilder {
                     .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: Some("Render Pipeline Layout"),
                         bind_group_layouts: &bind_group_layouts,
-                        push_constant_ranges: &[],
+                        ..Default::default()
                     });
 
             render_context
@@ -188,9 +188,9 @@ impl MaterialBuilder {
                     },
                     depth_stencil: Some(wgpu::DepthStencilState {
                         format: wgpu::TextureFormat::Depth32Float,
-                        depth_write_enabled: true,
-                        depth_compare: wgpu::CompareFunction::Less, // standard depth test
-                        stencil: wgpu::StencilState::default(),     // no stencil operations
+                        depth_write_enabled: Some(true),
+                        depth_compare: Some(wgpu::CompareFunction::Less), // standard depth test
+                        stencil: wgpu::StencilState::default(),           // no stencil operations
                         bias: wgpu::DepthBiasState::default(),
                     }),
                     // depth_stencil: None,
@@ -201,7 +201,7 @@ impl MaterialBuilder {
                     },
                     // If the pipeline will be used with a multiview render pass, this
                     // indicates how many array layers the attachments will have.
-                    multiview: None,
+                    multiview_mask: None,
                     // Useful for optimizing shader compilation on Android
                     cache: None,
                 })
