@@ -1,4 +1,4 @@
-use cgmath::{Vector3, num_traits::pow, vec3};
+use cgmath::{EuclideanSpace, Point3, Vector3, num_traits::pow, vec3};
 
 use crate::entity::core::instance::{Instance, InstanceController, InstanceControllerTrait};
 
@@ -187,7 +187,6 @@ impl Animation {
 
         self.offset = offset;
 
-        // Example: color from height
         // let height = (offset.y * 0.5 + 0.5).clamp(0.0, 1.0);
         // self.color = Vector3::new(1.0, 0.2, 0.6) * height;
     }
@@ -203,7 +202,10 @@ pub struct AnimationHandler {
 }
 
 impl AnimationHandler {
-    pub fn new(instances: &[Instance], animations: Vec<AnimationType>) -> AnimationHandler {
+    pub fn new_from_instances(
+        instances: &[Instance],
+        animations: Vec<AnimationType>,
+    ) -> AnimationHandler {
         let mut steps = Vec::new();
         let mut persistents = Vec::new();
 
@@ -233,6 +235,57 @@ impl AnimationHandler {
                     })
                     .collect()
             },
+        }
+    }
+
+    pub fn new_from_point(
+        base_pos: Point3<f32>,
+        animations: Vec<AnimationType>,
+    ) -> AnimationHandler {
+        let mut steps = Vec::new();
+        let mut persistents = Vec::new();
+
+        for anim in animations {
+            match anim {
+                AnimationType::Step(step) => steps.push(step),
+                AnimationType::Persistent(persistent) => persistents.push(persistent),
+                // add other variants here as needed
+            }
+        }
+        AnimationHandler {
+            disabled: false,
+            movement_list: {
+                [Animation {
+                    base_position: base_pos.to_vec(),
+                    offset: vec3(0.0, 0.0, 0.0),
+                    persistents: persistents.clone(),
+                    steps: steps.clone(),
+                    color: Vector3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                }]
+                .to_vec()
+            },
+        }
+    }
+
+    pub fn add_animation(&mut self, anim: AnimationType, animation_index: usize) {
+        match anim {
+            AnimationType::Step(step) => self
+                .movement_list
+                .get_mut(animation_index)
+                .unwrap()
+                .steps
+                .push(step),
+            AnimationType::Persistent(persistent) => self
+                .movement_list
+                .get_mut(animation_index)
+                .unwrap()
+                .persistents
+                .push(persistent),
+            // add other variants here as needed
         }
     }
 
@@ -288,7 +341,7 @@ impl AnimationHandler {
         }
     }
 
-    pub fn update(&mut self, dt: f32, instances: &mut [Instance]) {
+    pub fn update_instance(&mut self, dt: f32, instances: &mut [Instance]) {
         for (anim, instance) in self.movement_list.iter_mut().zip(instances.iter_mut()) {
             anim.update(dt);
 
@@ -296,5 +349,26 @@ impl AnimationHandler {
             instance.bounding = instance.size + instance.position;
             instance.color = anim.color;
         }
+    }
+    pub fn reset_point_position_to_current_position(&mut self, singular: &mut Point3<f32>) {
+        let anim = self.movement_list.get_mut(0).unwrap();
+        let final_pos = anim.final_position();
+
+        singular.x = final_pos.x;
+        singular.y = final_pos.y;
+        singular.z = final_pos.z;
+        anim.base_position = final_pos;
+        anim.offset = Vector3::new(0.0, 0.0, 0.0);
+        anim.steps.clear();
+        anim.persistents.clear();
+    }
+
+    pub fn update_point(&mut self, dt: f32, singular: &mut Point3<f32>) {
+        let anim = self.movement_list.get_mut(0).unwrap();
+        anim.update(dt);
+
+        singular.x = anim.final_position().x;
+        singular.y = anim.final_position().y;
+        singular.z = anim.final_position().z;
     }
 }

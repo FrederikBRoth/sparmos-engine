@@ -11,28 +11,73 @@ use crate::{
         render::RenderContext,
         resource::{GpuBindable, System},
     },
-    helpers::line_trace::OPENGL_TO_WGPU_MATRIX,
+    helpers::{
+        animation::{AnimationHandler, AnimationStep, AnimationTransition, AnimationType},
+        line_trace::OPENGL_TO_WGPU_MATRIX,
+    },
 };
 
 pub struct CameraAnimator {
+    pub disabled: bool,
     pub speed: f32,
-    pub animating: bool,
-    pub time: f32,
-    pub start_eye: Point3<f32>,
-    pub end_eye: Point3<f32>,
-    pub start_target: Point3<f32>,
-    pub end_target: Point3<f32>,
-    pub aspect_ratio_limit: f32,
-    pub height_modifier: f32,
+    pub eye_animator: AnimationHandler,
+    pub target_animator: AnimationHandler,
 }
 
 impl CameraAnimator {
-    pub fn lerp(&self) -> (Point3<f32>, Point3<f32>) {
-        let lerp_value = self.time.clamp(0.0, 1.0);
-        let eye_anim = self.start_eye + (self.end_eye - self.start_eye) * lerp_value;
-        let target_anim = self.start_target + (self.end_target - self.start_target) * lerp_value;
-        (eye_anim, target_anim)
+    pub fn new(speed: f32, eye_start: Point3<f32>, target_start: Point3<f32>) -> CameraAnimator {
+        let eye_ah = AnimationHandler::new_from_point(eye_start, vec![]);
+        let target_ah = AnimationHandler::new_from_point(target_start, vec![]);
+
+        CameraAnimator {
+            disabled: true,
+            speed,
+            eye_animator: eye_ah,
+            target_animator: target_ah,
+        }
     }
+
+    pub fn update(&mut self, dt: f32, camera: &mut Camera) {
+        if self.disabled {
+            self.eye_animator
+                .movement_list
+                .get_mut(0)
+                .unwrap()
+                .base_position = camera.eye.to_vec();
+            self.target_animator
+                .movement_list
+                .get_mut(0)
+                .unwrap()
+                .base_position = camera.target.to_vec();
+            return;
+        }
+        self.eye_animator.update_point(dt, &mut camera.eye);
+        self.target_animator.update_point(dt, &mut camera.target);
+    }
+
+    pub fn add_animation(
+        &mut self,
+        eye_anim: Option<AnimationType>,
+        target_anim: Option<AnimationType>,
+    ) {
+        if let Some(anim) = eye_anim {
+            self.eye_animator.add_animation(anim, 0);
+        }
+        if let Some(anim) = target_anim {
+            self.target_animator.add_animation(anim, 0);
+        }
+    }
+
+    pub fn reset_animation(&mut self, camera: &mut Camera) {
+        self.eye_animator
+            .reset_point_position_to_current_position(&mut camera.eye);
+        self.target_animator
+            .reset_point_position_to_current_position(&mut camera.target);
+    }
+}
+pub enum CameraMode {
+    FreeMode,
+    FixedMode,
 }
 
 pub struct Camera {
@@ -43,16 +88,16 @@ pub struct Camera {
     pub fovy: f32,
     pub znear: f32,
     pub zfar: f32,
-    // pub camera_animator: CameraAnimator,
     pub yaw: f32,
     pub pitch: f32,
     pub forward: Vector3<f32>,
+    pub camera_mode: CameraMode,
 }
 
 impl Camera {
     pub fn new(screen_size: PhysicalSize<f32>) -> Self {
         let eye = Point3::new(140.0, -17.0, -382.0);
-        let target = Point3::new(20.0, 25.0, 20.0);
+        let target = Point3::new(25.0, 45.0, 20.0);
 
         let mut camera = Camera {
             eye,
@@ -65,24 +110,18 @@ impl Camera {
             fovy: 90.0,
             znear: 0.1,
             zfar: 5000.0,
-            // camera_animator: CameraAnimator {
-            //     animating: false,
-            //     time: 0.0,
-            //     start_eye: eye,
-            //     end_eye: eye,
-            //     start_target: target,
-            //     end_target: target,
-            //     aspect_ratio_limit: 0.8,
-            //     height_modifier: 0.0,
-            //     speed: 100.0,
-            // },
+            camera_mode: CameraMode::FreeMode,
         };
         camera.update_forward();
         camera
     }
     fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        // let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.eye + self.forward, self.up);
+        let view = match self.camera_mode {
+            CameraMode::FreeMode => {
+                cgmath::Matrix4::look_at_rh(self.eye, self.eye + self.forward, self.up)
+            }
+            CameraMode::FixedMode => cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up),
+        };
 
         // let ortho = cgmath::ortho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
@@ -150,6 +189,10 @@ impl Camera {
         };
 
         self.forward = forward.normalize();
+    }
+
+    pub fn set_camera_mode(&mut self, mode: CameraMode) {
+        self.camera_mode = mode;
     }
 }
 
@@ -250,6 +293,10 @@ impl CameraSystem {
     }
 
     pub fn process_events(&mut self, event: &WindowEvent, camera: &mut Camera) -> bool {
+        if let CameraMode::FixedMode = camera.camera_mode {
+            self.reset_input();
+            return false;
+        }
         match event {
             WindowEvent::KeyboardInput {
                 event:
@@ -428,6 +475,18 @@ impl CameraSystem {
     //     self.camera.camera_animator.time = 0.0;
     //     self.camera.camera_animator.speed = speed;
     // }
+    fn reset_input(&mut self) {
+        self.is_up_pressed = false;
+        self.is_down_pressed = false;
+        self.is_forward_pressed = false;
+        self.is_backward_pressed = false;
+        self.is_left_pressed = false;
+        self.is_right_pressed = false;
+        self.is_tilt_up_pressed = false;
+        self.is_tilt_down_pressed = false;
+        self.is_turn_left_pressed = false;
+        self.is_turn_right_pressed = false;
+    }
 }
 
 pub fn normalize_and_map_camera_height(x: i64, a: i64, b: i64, start: f32, end: f32) -> f32 {

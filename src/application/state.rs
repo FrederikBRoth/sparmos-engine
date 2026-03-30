@@ -236,7 +236,7 @@ impl State {
                     .get_mut(renderable.instance_controller_handle)
                     .unwrap();
 
-                ah.update(dt.as_secs_f32(), ic.instances_mut().as_mut());
+                ah.update_instance(dt.as_secs_f32(), ic.instances_mut().as_mut());
             }
         }
         {
