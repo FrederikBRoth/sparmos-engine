@@ -2,7 +2,10 @@ use std::sync::{Arc, Mutex, RwLock, atomic::AtomicUsize};
 
 use cgmath::Rotation3;
 
-use crate::entity::core::geometry::VertexBufferLayoutOwned;
+use crate::entity::core::{
+    geometry::VertexBufferLayoutOwned,
+    render::{InstanceControllerHandle, RenderContext},
+};
 
 #[derive(Clone)]
 pub struct InstanceController<T>
@@ -20,28 +23,29 @@ impl<T> InstanceController<T>
 where
     T: InstanceToRaw + bytemuck::Pod + Send + Sync + 'static,
 {
-    pub fn new(instances: Vec<Instance>, device: &wgpu::Device) -> Self {
+    pub fn new(instances: Vec<Instance>, rc: &mut RenderContext) -> InstanceControllerHandle {
         let mut raw = Vec::with_capacity(instances.len());
 
         raw.extend(instances.iter().filter(|i| i.should_render).map(T::to_raw));
 
         let len = raw.len();
 
-        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        let instance_buffer = rc.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Instance Buffer"),
             size: (instances.len() * std::mem::size_of::<T>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        Self {
+        let ic = InstanceController {
             instances: Arc::new(RwLock::new(instances)),
             pending: Arc::new(Mutex::new(raw)),
             offset: 0,
             atomic_usize: Arc::new(AtomicUsize::new(len)),
             buffer_layout: T::desc(),
             instance_buffer,
-        }
+        };
+        rc.gpu_objects.instance_controllers.insert(Box::new(ic))
     }
 }
 pub trait InstanceControllerTrait: Send + Sync {
@@ -56,7 +60,7 @@ pub trait InstanceControllerTrait: Send + Sync {
 }
 impl<T> InstanceControllerTrait for InstanceController<T>
 where
-    T: InstanceToRaw + bytemuck::Pod + Send + Sync + 'static,
+    T: InstanceToRaw + bytemuck::Pod + Send + Sync,
 {
     fn update(&self, queue: &wgpu::Queue) {
         let pending = Arc::clone(&self.pending);

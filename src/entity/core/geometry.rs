@@ -1,5 +1,7 @@
 use std::mem;
 use wgpu::util::DeviceExt;
+
+use crate::entity::core::render::{MeshHandle, RenderContext};
 #[derive(Clone)]
 pub struct VertexBufferLayoutOwned {
     pub array_stride: u64,
@@ -41,7 +43,7 @@ pub struct Primitive {
 }
 
 impl Primitive {
-    pub fn make_mb(&self, device: &wgpu::Device) -> Mesh {
+    pub fn make_mb(&self, rc: &mut RenderContext) -> MeshHandle {
         let buffer_layout = VertexBufferLayoutOwned {
             array_stride: mem::size_of::<PrimitiveVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -68,14 +70,16 @@ impl Primitive {
                 },
             ],
         };
-        Mesh::new(
-            device,
+        let mesh = Mesh::new(
+            &rc.device,
             &self.vertices,
             &self.indices,
             self.vertices.len() as u32,
             self.indices.len() as u32,
             buffer_layout,
-        )
+        );
+
+        rc.gpu_objects.meshes.insert(mesh)
     }
 }
 

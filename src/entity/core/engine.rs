@@ -1,27 +1,25 @@
+use std::{any::Any, collections::HashMap};
+
 use hecs::{DynamicBundle, Entity, World};
 
-use crate::entity::core::resource::{Resources, System};
+use crate::entity::core::{
+    render::RenderContext,
+    resource::{Resources, System},
+};
 
 pub struct Engine {
     pub world: World,
     pub resources: Resources,
+    pub render_context: RenderContext,
+    pub args: HashMap<String, Box<dyn Any>>,
 }
 
 impl Engine {
-    pub fn add_system<T: System + 'static>(&mut self, system: T, device: &wgpu::Device) {
-        self.resources.register(system, device);
+    pub fn add_system<T: System + 'static>(&mut self, system: T) {
+        self.resources.register(system, &self.render_context.device);
     }
     #[inline]
     pub fn add_entity<B: DynamicBundle>(&mut self, bundle: B) -> Entity {
         self.world.spawn(bundle)
-    }
-}
-
-impl Default for Engine {
-    fn default() -> Self {
-        Self {
-            world: World::new(),
-            resources: Resources::new(),
-        }
     }
 }

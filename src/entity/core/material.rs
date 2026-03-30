@@ -7,7 +7,7 @@ use crate::entity::{
         buffer::Buffer,
         geometry::{Mesh, VertexBufferLayoutOwned},
         instance::InstanceController,
-        render::RenderContext,
+        render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
         resource::GpuBindable,
     },
     texture::Texture,
@@ -73,10 +73,23 @@ impl MaterialBuilder {
 
     pub fn build(
         &self,
-        mesh: &VertexBufferLayoutOwned,
-        render_context: &RenderContext,
-        instance_controller: &VertexBufferLayoutOwned,
-    ) -> Material {
+        mesh: &MeshHandle,
+        instance_controller: &InstanceControllerHandle,
+        render_context: &mut RenderContext,
+    ) -> MaterialHandle {
+        let mesh = &render_context
+            .gpu_objects
+            .meshes
+            .get(*mesh)
+            .unwrap()
+            .buffer_layout;
+        let instance_controller = render_context
+            .gpu_objects
+            .instance_controllers
+            .get(*instance_controller)
+            .unwrap()
+            .layout();
+
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> =
             self.layouts.iter().map(|(_, v)| Some(v)).collect();
         for buffer in self.buffers.values() {
@@ -207,13 +220,14 @@ impl MaterialBuilder {
                 })
         };
 
-        Material {
+        let material = Material {
             pipeline,
             layouts: self.layouts.clone(),
             texture: self.texture.clone(),
             //TODO FIX
             buffers: self.buffers.clone(),
-        }
+        };
+        render_context.gpu_objects.materials.insert(material)
     }
 }
 

@@ -7,13 +7,13 @@ use slotmap::{SlotMap, new_key_type};
 use wgpu::ShaderModule;
 
 use crate::{
-    application::state::{Core, DeviceBackend},
+    application::state::DeviceBackend,
     entity::{
         core::{
             engine::Engine,
             geometry::Mesh,
             instance::{InstanceController, InstanceControllerTrait, InstanceToRaw},
-            material::Material,
+            material::{Material, MaterialBuilder},
         },
         texture::TextureSampleView,
     },
@@ -28,11 +28,15 @@ pub struct RenderContext {
     pub gpu_objects: GpuObjects,
 }
 impl RenderContext {
-    pub fn add_shader(&mut self, device: &wgpu::Device, label: &str, shader_path: &str) {
-        let _ = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(label),
-            source: wgpu::ShaderSource::Wgsl(shader_path.into()),
-        });
+    pub fn add_shader(&mut self, label: &str, shader_path: &str) {
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(label),
+                source: wgpu::ShaderSource::Wgsl(shader_path.into()),
+            });
+
+        self.shaders.insert(label.to_string(), shader);
     }
 }
 
@@ -43,16 +47,15 @@ pub struct Renderable {
 }
 
 impl<'a> DrawMesh for wgpu::RenderPass<'a> {
-    fn draw_scene(&mut self, _backend: &DeviceBackend, core: &Core) {
-        let engine = &core.engine;
-        let scene = &core.render_context.gpu_objects;
+    fn draw_scene(&mut self, _backend: &DeviceBackend, engine: &Engine) {
+        let scene = &engine.render_context.gpu_objects;
         let mut bind_group_id = 0;
         for (_name, bind_group) in engine.resources.bind_groups.iter() {
             self.set_bind_group(bind_group_id, bind_group, &[]);
             bind_group_id += 1;
         }
 
-        for (renderable) in engine.world.query::<&Renderable>().iter() {
+        for renderable in engine.world.query::<&Renderable>().iter() {
             let mesh = &scene.meshes[renderable.mesh_handle];
             let material = &scene.materials[renderable.material_handle];
             let instance_controller =
@@ -83,7 +86,7 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
 
 pub trait DrawMesh {
     #[allow(unused)]
-    fn draw_scene(&mut self, backend: &DeviceBackend, core: &Core);
+    fn draw_scene(&mut self, backend: &DeviceBackend, engine: &Engine);
 }
 new_key_type! { pub struct MeshHandle; }
 new_key_type! { pub struct MaterialHandle; }
