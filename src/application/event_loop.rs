@@ -153,7 +153,7 @@ where
 
                     log::warn!("{:?}", size);
                     state.resize(size);
-                    game.resize(&mut state.engine);
+                    game.resize(&mut state.engine, &mut state.world);
 
                     state.window().request_redraw();
 
@@ -205,18 +205,18 @@ where
                 let dt = self.last_time.elapsed();
                 self.last_time = web_time::Instant::now();
                 state.update(dt);
-                game.update(dt, &mut state.engine);
+                game.update(dt, &mut state.engine, &mut state.world);
 
                 state.render(game);
             }
 
             WindowEvent::Resized(size) => {
                 state.resize(size);
-                game.resize(&mut state.engine);
+                game.resize(&mut state.engine, &mut state.world);
             }
 
             _ => {
-                game.process_event(&event, &state.size, &mut state.engine);
+                game.process_event(&event, &state.size, &mut state.engine, &mut state.world);
             }
         }
     }

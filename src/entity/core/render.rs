@@ -11,9 +11,11 @@ use crate::{
     entity::{
         core::{
             engine::Engine,
+            entities::World,
             geometry::Mesh,
             instance::{InstanceController, InstanceControllerTrait, InstanceToRaw},
             material::{Material, MaterialBuilder},
+            post_processing::PostProcessHandler,
         },
         texture::TextureSampleView,
     },
@@ -21,11 +23,13 @@ use crate::{
 
 pub struct RenderContext {
     pub depth_texture: TextureSampleView,
+    pub overscan_depth_texture: TextureSampleView,
     pub shaders: HashMap<String, ShaderModule>,
     pub device: Arc<wgpu::Device>, // Logical GPU device
     pub queue: Arc<wgpu::Queue>,   // Command queue for GPU
     pub config: wgpu::SurfaceConfiguration,
     pub gpu_objects: GpuObjects,
+    pub post_processing: PostProcessHandler,
 }
 impl RenderContext {
     pub fn add_shader(&mut self, label: &str, shader_path: &str) {
@@ -47,15 +51,15 @@ pub struct Renderable {
 }
 
 impl<'a> DrawMesh for wgpu::RenderPass<'a> {
-    fn draw_scene(&mut self, _backend: &DeviceBackend, engine: &Engine) {
+    fn draw_scene(&mut self, _backend: &DeviceBackend, engine: &Engine, world: &World) {
         let scene = &engine.render_context.gpu_objects;
         let mut bind_group_id = 0;
-        for (_name, bind_group) in engine.resources.bind_groups.iter() {
+        for (_name, bind_group) in world.resources.bind_groups.iter() {
             self.set_bind_group(bind_group_id, bind_group, &[]);
             bind_group_id += 1;
         }
 
-        for renderable in engine.world.query::<&Renderable>().iter() {
+        for renderable in world.entities.query::<&Renderable>().iter() {
             let mesh = &scene.meshes[renderable.mesh_handle];
             let material = &scene.materials[renderable.material_handle];
             let instance_controller =
@@ -86,7 +90,7 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
 
 pub trait DrawMesh {
     #[allow(unused)]
-    fn draw_scene(&mut self, backend: &DeviceBackend, engine: &Engine);
+    fn draw_scene(&mut self, backend: &DeviceBackend, engine: &Engine, world: &World);
 }
 new_key_type! { pub struct MeshHandle; }
 new_key_type! { pub struct MaterialHandle; }

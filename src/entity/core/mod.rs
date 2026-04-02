@@ -1,7 +1,9 @@
 pub mod buffer;
 pub mod engine;
+pub mod entities;
 pub mod geometry;
 pub mod instance;
 pub mod material;
+pub mod post_processing;
 pub mod render;
 pub mod resource;

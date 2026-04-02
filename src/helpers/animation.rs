@@ -227,11 +227,7 @@ impl AnimationHandler {
                         offset: vec3(0.0, 0.0, 0.0),
                         persistents: persistents.clone(),
                         steps: steps.clone(),
-                        color: Vector3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        },
+                        color: instance.color,
                     })
                     .collect()
             },

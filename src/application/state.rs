@@ -1,9 +1,9 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use std::vec;
 
-use hecs::World;
 use wgpu::{CurrentSurfaceTexture, InstanceDescriptor};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
@@ -11,6 +11,8 @@ use winit::window::Window;
 
 use crate::application::gui::EguiRenderer;
 use crate::entity::core::engine::Engine;
+use crate::entity::core::entities::World;
+use crate::entity::core::post_processing::{self, Effect, PostProcessHandler};
 use crate::entity::core::render::{self, DrawMesh, GpuObjects, RenderContext, Renderable};
 use crate::entity::core::resource::Resources;
 use crate::entity::texture::Texture;
@@ -32,18 +34,20 @@ pub struct State {
     pub egui_renderer: EguiRenderer,
     pub backend: DeviceBackend,
     pub engine: Engine,
+    pub world: World,
 }
 pub trait Game {
-    fn update(&mut self, dt: std::time::Duration, engine: &mut Engine);
+    fn update(&mut self, dt: std::time::Duration, engine: &mut Engine, world: &mut World);
 
     fn process_event(
         &mut self,
         event: &WindowEvent,
         screen: &PhysicalSize<u32>,
         engine: &mut Engine,
+        world: &mut World,
     );
 
-    fn resize(&mut self, core: &mut Engine);
+    fn resize(&mut self, engine: &mut Engine, world: &mut World);
 
     fn setup(&mut self, state: &mut State);
 
@@ -156,21 +160,37 @@ impl State {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
+        let mut post_processing = PostProcessHandler::new(Arc::clone(&device), Arc::clone(&queue));
+
+        let overscan_size = PhysicalSize::new(
+            (size.width as f32 * 1.1) as u32,
+            (size.height as f32 * 1.1) as u32,
+        );
         let render_context = RenderContext {
             depth_texture: Texture::create_depth_texture(&device, &size, "depth_texture_primitive"),
+            overscan_depth_texture: Texture::create_depth_texture(
+                &device,
+                &overscan_size,
+                "overscan_depth_texture",
+            ),
             shaders: HashMap::new(),
             device: Arc::clone(&device),
-            queue,
+            queue: Arc::clone(&queue),
             config,
             gpu_objects: GpuObjects::new(),
+            post_processing,
         };
         let egui_renderer = EguiRenderer::new(&device, surface_format, None, 1, &window);
         let engine = Engine {
             render_context,
             args: HashMap::new(),
-            world: World::new(),
-            resources: Resources::new(),
+            frame_count: 0,
+            time_acc: Duration::ZERO,
+            render_commands: Vec::new(),
         };
+
+        // post_processing.new_effect(size, surface_format, Effect::ChromaticTwo);
+
         Self {
             surface,
             surface_configured: false,
@@ -180,6 +200,7 @@ impl State {
             scroll_y: 0,
             egui_renderer,
             backend,
+            world: World::new(Arc::clone(&device), hecs::World::new(), Resources::new()),
         }
     }
 
@@ -202,12 +223,26 @@ impl State {
             // if let Some(game_loop) = self.game_loop.as_mut() {
             //     game_loop.resize(&self.render_context.config);
             // }
+            let overscan_size = PhysicalSize::new(
+                (new_size.width as f32 * 1.1) as u32,
+                (new_size.height as f32 * 1.1) as u32,
+            );
+
             self.engine.render_context.depth_texture = Texture::create_depth_texture(
                 &self.engine.render_context.device,
                 &new_size,
                 "depth_texture_primitive",
             );
-            // NEW!
+            self.engine.render_context.overscan_depth_texture = Texture::create_depth_texture(
+                &self.engine.render_context.device,
+                &overscan_size,
+                "overscan_depth_texture",
+            );
+
+            self.engine
+                .render_context
+                .post_processing
+                .resize(overscan_size);
         } else {
             println!("Not configured");
             log::warn!("Not Configured");
@@ -221,10 +256,21 @@ impl State {
     // }
     //
     pub fn update(&mut self, dt: std::time::Duration) {
+        self.engine.frame_count += 1;
+        self.engine.time_acc += dt;
+
+        if self.engine.time_acc >= std::time::Duration::from_secs(1) {
+            let fps = self.engine.frame_count as f64 / self.engine.time_acc.as_secs_f64();
+            println!("FPS: {:.2}", fps);
+
+            // reset
+            self.engine.frame_count = 0;
+            self.engine.time_acc = std::time::Duration::ZERO;
+        }
         {
             let mut query = self
-                .engine
                 .world
+                .entities
                 .query::<(&Renderable, &mut AnimationHandler)>();
             for (renderable, ah) in query.iter() {
                 // ah.animate(dt.as_secs_f32());
@@ -240,7 +286,7 @@ impl State {
             }
         }
         {
-            let mut query = self.engine.world.query::<&Renderable>();
+            let mut query = self.world.entities.query::<&Renderable>();
             for renderable in query.iter() {
                 self.engine
                     .render_context
@@ -271,12 +317,103 @@ impl State {
                         label: Some("Render Encoder"),
                     },
                 );
-
+                if self
+                    .engine
+                    .render_context
+                    .post_processing
+                    .post_processes
+                    .len()
+                    > 0
                 {
-                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("Render Pass"),
+                    let mut post_processes = self
+                        .engine
+                        .render_context
+                        .post_processing
+                        .post_processes
+                        .iter()
+                        .peekable();
+
+                    let mut current_post_process = post_processes.peek().unwrap().1;
+                    {
+                        let mut render_pass =
+                            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("Main Render Pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &current_post_process.view,
+                                    depth_slice: None,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })],
+                                depth_stencil_attachment: Some(
+                                    wgpu::RenderPassDepthStencilAttachment {
+                                        view: &self
+                                            .engine
+                                            .render_context
+                                            .overscan_depth_texture
+                                            .view,
+                                        depth_ops: Some(wgpu::Operations {
+                                            load: wgpu::LoadOp::Clear(1.0),
+                                            store: wgpu::StoreOp::Store,
+                                        }),
+                                        stencil_ops: None,
+                                    },
+                                ),
+                                occlusion_query_set: None,
+                                timestamp_writes: None,
+                                ..Default::default()
+                            });
+                        render_pass.draw_scene(&self.backend, &self.engine, &self.world);
+                    }
+
+                    while let Some((key, post_process)) = post_processes.next() {
+                        //There are no "extra post processes". Go to screen render
+                        let next_pp = post_processes.peek();
+                        match next_pp {
+                            Some(pp) => {
+                                let next = pp.1;
+                                let mut post_pass =
+                                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                        label: Some("Post Process Pass"),
+                                        color_attachments: &[Some(
+                                            wgpu::RenderPassColorAttachment {
+                                                view: &next.view, // 👈 NOW we render to screen
+                                                depth_slice: None,
+                                                resolve_target: None,
+                                                ops: wgpu::Operations {
+                                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                                    store: wgpu::StoreOp::Store,
+                                                },
+                                            },
+                                        )],
+                                        depth_stencil_attachment: None,
+                                        ..Default::default()
+                                    });
+
+                                post_pass.set_pipeline(&post_process.pipeline);
+                                post_pass.set_bind_group(0, &post_process.bind_group, &[]);
+                                post_pass.set_viewport(
+                                    0.0,
+                                    0.0,
+                                    self.size.width as f32,
+                                    self.size.height as f32,
+                                    0.0,
+                                    1.0,
+                                );
+                                post_pass.set_scissor_rect(0, 0, self.size.width, self.size.height);
+                                post_pass.draw(0..3, 0..1); // fullscreen triangle
+
+                                current_post_process = next;
+                            }
+                            None => break,
+                        }
+                    }
+                    let mut post_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Post Process Pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &view,
+                            view: &view, // 👈 NOW we render to screen
                             depth_slice: None,
                             resolve_target: None,
                             ops: wgpu::Operations {
@@ -284,20 +421,53 @@ impl State {
                                 store: wgpu::StoreOp::Store,
                             },
                         })],
-                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                            view: &self.engine.render_context.depth_texture.view,
-                            depth_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(1.0),
-                                store: wgpu::StoreOp::Store,
-                            }),
-                            stencil_ops: None,
-                        }),
-                        occlusion_query_set: None,
-                        timestamp_writes: None,
+                        depth_stencil_attachment: None,
                         ..Default::default()
                     });
 
-                    render_pass.draw_scene(&self.backend, &self.engine);
+                    post_pass.set_pipeline(&current_post_process.pipeline);
+                    post_pass.set_bind_group(0, &current_post_process.bind_group, &[]);
+                    post_pass.set_viewport(
+                        0.0,
+                        0.0,
+                        self.size.width as f32,
+                        self.size.height as f32,
+                        0.0,
+                        1.0,
+                    );
+                    post_pass.set_scissor_rect(0, 0, self.size.width, self.size.height);
+                    post_pass.draw(0..3, 0..1); // fullscreen triangle
+                } else {
+                    {
+                        let mut render_pass =
+                            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("Render Pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &view,
+                                    depth_slice: None,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })],
+                                depth_stencil_attachment: Some(
+                                    wgpu::RenderPassDepthStencilAttachment {
+                                        view: &self.engine.render_context.depth_texture.view,
+                                        depth_ops: Some(wgpu::Operations {
+                                            load: wgpu::LoadOp::Clear(1.0),
+                                            store: wgpu::StoreOp::Store,
+                                        }),
+                                        stencil_ops: None,
+                                    },
+                                ),
+                                occlusion_query_set: None,
+                                timestamp_writes: None,
+                                ..Default::default()
+                            });
+
+                        render_pass.draw_scene(&self.backend, &self.engine, &self.world);
+                    }
                 }
 
                 #[cfg(feature = "gui")]
