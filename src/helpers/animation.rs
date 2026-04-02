@@ -2,6 +2,10 @@ use cgmath::{EuclideanSpace, Point3, Vector3, num_traits::pow, vec3};
 
 use crate::entity::core::instance::{Instance, InstanceController, InstanceControllerTrait};
 
+pub enum TransitionType {
+    Overwrite,
+    Additive,
+}
 pub fn get_height_color(height: f32) -> Vector3<f32> {
     // high color rgb(255, 153, 230)
     //#f472b6

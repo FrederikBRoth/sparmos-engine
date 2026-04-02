@@ -1,4 +1,7 @@
-use cgmath::{EuclideanSpace, InnerSpace, Point3, SquareMatrix, Vector3, Vector4};
+use cgmath::{
+    EuclideanSpace, InnerSpace, Point3, Quaternion, Rad, Rotation, Rotation3, SquareMatrix,
+    Vector3, Vector4,
+};
 use wgpu::{BindGroupLayout, Device, util::DeviceExt};
 use winit::{
     dpi::PhysicalSize,
@@ -12,7 +15,7 @@ use crate::{
         resource::{GpuBindable, System},
     },
     helpers::{
-        animation::{AnimationHandler, AnimationStep, AnimationTransition, AnimationType},
+        animation::{AnimationHandler, AnimationType},
         line_trace::OPENGL_TO_WGPU_MATRIX,
     },
 };
@@ -24,6 +27,37 @@ pub struct CameraAnimator {
     pub target_animator: AnimationHandler,
 }
 
+#[derive(PartialEq, Eq)]
+pub enum MovementPress {
+    Pressed,
+    NotPressed,
+    Override,
+}
+
+pub enum MovementKey {
+    Up,
+    Down,
+    Forward,
+    Backward,
+    Left,
+    Right,
+    TiltUp,
+    TiltDown,
+    TurnLeft,
+    TurnRight,
+    RotateLeft,
+    RotateRight,
+}
+
+impl MovementPress {
+    fn is_pressed(&self) -> bool {
+        match self {
+            MovementPress::Pressed | MovementPress::Override => true,
+
+            MovementPress::NotPressed => false,
+        }
+    }
+}
 impl CameraAnimator {
     pub fn new(speed: f32, eye_start: Point3<f32>, target_start: Point3<f32>) -> CameraAnimator {
         let eye_ah = AnimationHandler::new_from_point(eye_start, vec![]);
@@ -77,7 +111,7 @@ impl CameraAnimator {
 }
 pub enum CameraMode {
     FreeMode,
-    FixedMode,
+    AnimatedMode,
 }
 
 pub struct Camera {
@@ -96,16 +130,16 @@ pub struct Camera {
 
 impl Camera {
     pub fn new(screen_size: PhysicalSize<f32>) -> Self {
-        let eye = Point3::new(140.0, -17.0, -382.0);
-        let target = Point3::new(25.0, 45.0, 20.0);
+        let eye = Point3::new(0.0, 0.0, -400.0);
+        let target = Point3::new(0.0, 0.0, 0.0);
 
         let mut camera = Camera {
             eye,
             target,
             up: cgmath::Vector3::unit_y(),
             forward: Vector3::unit_z(),
-            yaw: 111.0,
-            pitch: 1.0,
+            yaw: 90.0,
+            pitch: 0.0,
             aspect: screen_size.width / screen_size.height,
             fovy: 90.0,
             znear: 0.1,
@@ -120,7 +154,7 @@ impl Camera {
             CameraMode::FreeMode => {
                 cgmath::Matrix4::look_at_rh(self.eye, self.eye + self.forward, self.up)
             }
-            CameraMode::FixedMode => cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up),
+            CameraMode::AnimatedMode => cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up),
         };
 
         // let ortho = cgmath::ortho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
@@ -233,16 +267,18 @@ pub struct CameraSystem {
 
     pub sensitivity: f32,
 
-    pub is_up_pressed: bool,
-    pub is_down_pressed: bool,
-    pub is_forward_pressed: bool,
-    pub is_backward_pressed: bool,
-    pub is_left_pressed: bool,
-    pub is_right_pressed: bool,
-    pub is_tilt_up_pressed: bool,
-    pub is_tilt_down_pressed: bool,
-    pub is_turn_left_pressed: bool,
-    pub is_turn_right_pressed: bool,
+    pub is_up_pressed: MovementPress,
+    pub is_down_pressed: MovementPress,
+    pub is_forward_pressed: MovementPress,
+    pub is_backward_pressed: MovementPress,
+    pub is_left_pressed: MovementPress,
+    pub is_right_pressed: MovementPress,
+    pub is_tilt_up_pressed: MovementPress,
+    pub is_tilt_down_pressed: MovementPress,
+    pub is_turn_left_pressed: MovementPress,
+    pub is_turn_right_pressed: MovementPress,
+    pub rotate_left: MovementPress,
+    pub rotate_right: MovementPress,
 }
 
 impl CameraSystem {
@@ -279,21 +315,23 @@ impl CameraSystem {
             camera_uniform,
             camera_bind_group_layout,
             camera_buffer,
-            is_up_pressed: false,
-            is_down_pressed: false,
-            is_forward_pressed: false,
-            is_backward_pressed: false,
-            is_left_pressed: false,
-            is_right_pressed: false,
-            is_tilt_up_pressed: false,
-            is_tilt_down_pressed: false,
-            is_turn_left_pressed: false,
-            is_turn_right_pressed: false,
+            is_up_pressed: MovementPress::NotPressed,
+            is_down_pressed: MovementPress::NotPressed,
+            is_forward_pressed: MovementPress::NotPressed,
+            is_backward_pressed: MovementPress::NotPressed,
+            is_left_pressed: MovementPress::NotPressed,
+            is_right_pressed: MovementPress::NotPressed,
+            is_tilt_up_pressed: MovementPress::NotPressed,
+            is_tilt_down_pressed: MovementPress::NotPressed,
+            is_turn_left_pressed: MovementPress::NotPressed,
+            is_turn_right_pressed: MovementPress::NotPressed,
+            rotate_left: MovementPress::NotPressed,
+            rotate_right: MovementPress::NotPressed,
         }
     }
 
     pub fn process_events(&mut self, event: &WindowEvent, camera: &mut Camera) -> bool {
-        if let CameraMode::FixedMode = camera.camera_mode {
+        if let CameraMode::AnimatedMode = camera.camera_mode {
             self.reset_input();
             return false;
         }
@@ -311,44 +349,44 @@ impl CameraSystem {
                 let is_pressed = var_name;
                 match keycode {
                     KeyCode::ShiftLeft => {
-                        self.is_up_pressed = is_pressed;
+                        self.is_up_pressed = get_press_from_bool(is_pressed);
                         true
                     }
                     KeyCode::ControlLeft => {
-                        self.is_down_pressed = is_pressed;
+                        self.is_down_pressed = get_press_from_bool(is_pressed);
                         true
                     }
                     KeyCode::KeyW => {
-                        self.is_forward_pressed = is_pressed;
+                        self.is_forward_pressed = get_press_from_bool(is_pressed);
                         true
                     }
                     KeyCode::KeyA => {
-                        self.is_left_pressed = is_pressed;
+                        self.is_left_pressed = get_press_from_bool(is_pressed);
 
                         true
                     }
                     KeyCode::KeyS => {
-                        self.is_backward_pressed = is_pressed;
+                        self.is_backward_pressed = get_press_from_bool(is_pressed);
                         true
                     }
                     KeyCode::KeyD => {
-                        self.is_right_pressed = is_pressed;
+                        self.is_right_pressed = get_press_from_bool(is_pressed);
                         true
                     }
                     KeyCode::ArrowUp => {
-                        self.is_tilt_up_pressed = is_pressed;
+                        self.is_tilt_up_pressed = get_press_from_bool(is_pressed);
                         true
                     }
                     KeyCode::ArrowDown => {
-                        self.is_tilt_down_pressed = is_pressed;
+                        self.is_tilt_down_pressed = get_press_from_bool(is_pressed);
                         true
                     }
                     KeyCode::ArrowLeft => {
-                        self.is_turn_left_pressed = is_pressed;
+                        self.is_turn_left_pressed = get_press_from_bool(is_pressed);
                         true
                     }
                     KeyCode::ArrowRight => {
-                        self.is_turn_right_pressed = is_pressed;
+                        self.is_turn_right_pressed = get_press_from_bool(is_pressed);
                         true
                     }
                     KeyCode::Insert => {
@@ -380,41 +418,63 @@ impl CameraSystem {
     ) {
         let right: Vector3<f32> = camera.forward.cross(camera.up).normalize();
 
-        if self.is_forward_pressed {
+        if self.is_forward_pressed.is_pressed() {
             camera.eye += camera.forward * self.speed * dt.as_secs_f32();
         }
-        if self.is_backward_pressed {
+        if self.is_backward_pressed.is_pressed() {
             camera.eye -= camera.forward * self.speed * dt.as_secs_f32();
         }
-        if self.is_right_pressed {
+        if self.is_right_pressed.is_pressed() {
             camera.eye += right * self.speed * dt.as_secs_f32();
         }
-        if self.is_left_pressed {
+        if self.is_left_pressed.is_pressed() {
             camera.eye -= right * self.speed * dt.as_secs_f32();
         }
-        if self.is_up_pressed {
+        if self.is_up_pressed.is_pressed() {
             camera.eye += camera.up * self.speed * dt.as_secs_f32();
         }
-        if self.is_down_pressed {
+        if self.is_down_pressed.is_pressed() {
             camera.eye -= camera.up * self.speed * dt.as_secs_f32();
         }
-        if self.is_tilt_up_pressed {
+        if self.is_tilt_up_pressed.is_pressed() {
             camera.pitch -= self.sensitivity * dt.as_secs_f32();
             camera.update_forward();
         }
-        if self.is_tilt_down_pressed {
+        if self.is_tilt_down_pressed.is_pressed() {
             camera.pitch += self.sensitivity * dt.as_secs_f32();
             camera.update_forward();
         }
-        if self.is_turn_left_pressed {
+        if self.is_turn_left_pressed.is_pressed() {
             camera.yaw -= self.sensitivity * dt.as_secs_f32();
             camera.update_forward();
         }
-        if self.is_turn_right_pressed {
+        if self.is_turn_right_pressed.is_pressed() {
             camera.yaw += self.sensitivity * dt.as_secs_f32();
             camera.update_forward();
         }
 
+        if self.rotate_left.is_pressed() {
+            let dt = dt.as_secs_f32();
+
+            // vector from target → eye
+            let offset = camera.eye - camera.target;
+
+            // preserve radius
+            let radius = offset.magnitude();
+
+            // create rotation around the up axis
+            let rotation = Quaternion::from_axis_angle(camera.up.normalize(), Rad(self.speed * dt));
+
+            // rotate the offset
+            let new_offset = rotation.rotate_vector(offset);
+
+            // reapply radius (avoids drift)
+            camera.eye = camera.target + new_offset.normalize() * radius;
+        }
+        if self.rotate_right.is_pressed() {
+            // self.camera.eye =
+            //     self.camera.target - (forward - right * self.speed).normalize() * forward_mag;
+        }
         // if self.is_right_pressed {
         //     // Rescale the distance between the target and eye so
         //     // that it doesn't change. The eye therefore still
@@ -476,19 +536,47 @@ impl CameraSystem {
     //     self.camera.camera_animator.speed = speed;
     // }
     fn reset_input(&mut self) {
-        self.is_up_pressed = false;
-        self.is_down_pressed = false;
-        self.is_forward_pressed = false;
-        self.is_backward_pressed = false;
-        self.is_left_pressed = false;
-        self.is_right_pressed = false;
-        self.is_tilt_up_pressed = false;
-        self.is_tilt_down_pressed = false;
-        self.is_turn_left_pressed = false;
-        self.is_turn_right_pressed = false;
+        reset_if_not_override(&mut self.is_up_pressed);
+        reset_if_not_override(&mut self.is_down_pressed);
+        reset_if_not_override(&mut self.is_forward_pressed);
+        reset_if_not_override(&mut self.is_backward_pressed);
+        reset_if_not_override(&mut self.is_left_pressed);
+        reset_if_not_override(&mut self.is_right_pressed);
+        reset_if_not_override(&mut self.is_tilt_up_pressed);
+        reset_if_not_override(&mut self.is_tilt_down_pressed);
+        reset_if_not_override(&mut self.is_turn_left_pressed);
+        reset_if_not_override(&mut self.is_turn_right_pressed);
+    }
+    pub fn set(&mut self, key: MovementKey, state: MovementPress) {
+        match key {
+            MovementKey::Up => self.is_up_pressed = state,
+            MovementKey::Down => self.is_down_pressed = state,
+            MovementKey::Forward => self.is_forward_pressed = state,
+            MovementKey::Backward => self.is_backward_pressed = state,
+            MovementKey::Left => self.is_left_pressed = state,
+            MovementKey::Right => self.is_right_pressed = state,
+            MovementKey::TiltUp => self.is_tilt_up_pressed = state,
+            MovementKey::TiltDown => self.is_tilt_down_pressed = state,
+            MovementKey::TurnLeft => self.is_turn_left_pressed = state,
+            MovementKey::TurnRight => self.is_turn_right_pressed = state,
+            MovementKey::RotateLeft => self.rotate_left = state,
+            MovementKey::RotateRight => self.rotate_right = state,
+        }
+    }
+}
+fn reset_if_not_override(v: &mut MovementPress) {
+    if *v != MovementPress::Override {
+        *v = MovementPress::NotPressed;
     }
 }
 
+fn get_press_from_bool(state: bool) -> MovementPress {
+    if state {
+        MovementPress::Pressed
+    } else {
+        MovementPress::NotPressed
+    }
+}
 pub fn normalize_and_map_camera_height(x: i64, a: i64, b: i64, start: f32, end: f32) -> f32 {
     if a == b {
         return end;

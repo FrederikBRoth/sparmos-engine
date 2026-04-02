@@ -10,7 +10,7 @@ use winit::event::WindowEvent;
 use winit::window::Window;
 
 use crate::application::gui::EguiRenderer;
-use crate::entity::core::engine::Engine;
+use crate::entity::core::engine::{Arguments, Engine};
 use crate::entity::core::entities::World;
 use crate::entity::core::post_processing::{self, Effect, PostProcessHandler};
 use crate::entity::core::render::{self, DrawMesh, GpuObjects, RenderContext, Renderable};
@@ -181,9 +181,12 @@ impl State {
             post_processing,
         };
         let egui_renderer = EguiRenderer::new(&device, surface_format, None, 1, &window);
+        let arguments = Arguments {
+            args: HashMap::new(),
+        };
         let engine = Engine {
             render_context,
-            args: HashMap::new(),
+            arguments,
             frame_count: 0,
             time_acc: Duration::ZERO,
             render_commands: Vec::new(),
