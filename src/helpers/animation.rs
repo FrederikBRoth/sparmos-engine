@@ -17,17 +17,17 @@ pub fn get_height_color(height: f32) -> Vector3<f32> {
     low_color + (high_color - low_color) * height
 }
 #[derive(Copy, Clone)]
-pub enum AnimationTransition {
+pub enum Interpolation {
     EaseOut,
     EaseInEaseOut,
     EaseInEaseOutLoop,
     Linear,
 }
 
-impl AnimationTransition {
-    pub fn lerp(&self, t: f32, delay: f32) -> f32 {
+impl Interpolation {
+    pub fn lerp_delay(&self, t: f32, delay: f32) -> f32 {
         match self {
-            AnimationTransition::EaseInEaseOut => {
+            Interpolation::EaseInEaseOut => {
                 let number = t.clamp(0.0, 1.0);
                 if number < 0.5 {
                     4.0 * number * number * number
@@ -35,7 +35,7 @@ impl AnimationTransition {
                     1.0 - pow(-2.0 * number + 2.0, 3) / 2.0
                 }
             }
-            AnimationTransition::EaseInEaseOutLoop => {
+            Interpolation::EaseInEaseOutLoop => {
                 let freq = 1.0;
                 if t < delay {
                     return 0.0;
@@ -49,11 +49,39 @@ impl AnimationTransition {
                 let sqr = time * time;
                 (sqr / (2.0 * (sqr - time) + 1.0)) - 0.5
             }
-            AnimationTransition::EaseOut => {
+            Interpolation::EaseOut => {
                 let t = t.clamp(0.0, 1.0);
                 1.0 - (1.0 - t).powi(3)
             }
-            AnimationTransition::Linear => t.clamp(0.0, 1.0),
+            Interpolation::Linear => t.clamp(0.0, 1.0),
+        }
+    }
+    pub fn lerp(&self, t: f32) -> f32 {
+        match self {
+            Interpolation::EaseInEaseOut => {
+                let number = t.clamp(0.0, 1.0);
+                if number < 0.5 {
+                    4.0 * number * number * number
+                } else {
+                    1.0 - pow(-2.0 * number + 2.0, 3) / 2.0
+                }
+            }
+            Interpolation::EaseInEaseOutLoop => {
+                let freq = 1.0;
+                let elapsed = t % (freq * 2.0);
+                let time = if elapsed >= freq {
+                    (2.0 * freq - elapsed) / freq
+                } else {
+                    elapsed / freq
+                };
+                let sqr = time * time;
+                (sqr / (2.0 * (sqr - time) + 1.0)) - 0.5
+            }
+            Interpolation::EaseOut => {
+                let t = t.clamp(0.0, 1.0);
+                1.0 - (1.0 - t).powi(3)
+            }
+            Interpolation::Linear => t.clamp(0.0, 1.0),
         }
     }
 }
@@ -70,10 +98,10 @@ pub struct AnimationPersistent {
     pub speed: f32,
     pub time: f32,
     movement_vector: Vector3<f32>,
-    animation_transition: AnimationTransition,
+    animation_transition: Interpolation,
 }
 impl AnimationPersistent {
-    pub fn new(movement_vector: Vector3<f32>, animation_transition: AnimationTransition) -> Self {
+    pub fn new(movement_vector: Vector3<f32>, animation_transition: Interpolation) -> Self {
         Self {
             time: 0.0,
             speed: 1.0,
@@ -106,7 +134,7 @@ pub struct AnimationStep {
     pub t: f32,
     pub speed: f32,
     pub state: StepState,
-    pub animation_transition: AnimationTransition,
+    pub animation_transition: Interpolation,
 }
 
 impl AnimationStep {
@@ -116,7 +144,7 @@ impl AnimationStep {
         to: Vector3<f32>,
         t: f32,
         speed: f32,
-        animation_transition: AnimationTransition,
+        animation_transition: Interpolation,
         state: StepState,
     ) -> Self {
         Self {
@@ -150,7 +178,7 @@ impl AnimationStep {
             }
         }
 
-        let k = self.animation_transition.lerp(self.t, 0.0);
+        let k = self.animation_transition.lerp_delay(self.t, 0.0);
         let pos = self.from + (self.to - self.from) * k;
         pos - self.from
     }

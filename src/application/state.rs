@@ -4,19 +4,24 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::vec;
 
+use cpal::traits::{DeviceTrait, HostTrait};
 use wgpu::{CurrentSurfaceTexture, InstanceDescriptor};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
+use winit::keyboard::KeyCode;
 use winit::window::Window;
 
 use crate::application::gui::EguiRenderer;
-use crate::entity::core::engine::{Arguments, Engine};
+use crate::entity::audio::audio_handler::{self, AudioHandler, pianokey_to_hz};
+use crate::entity::audio::synth::{EnvelopeSegment, Sound};
+use crate::entity::core::engine::{self, Arguments, Engine, RenderCommands};
 use crate::entity::core::entities::World;
 use crate::entity::core::post_processing::{self, Effect, PostProcessHandler};
 use crate::entity::core::render::{self, DrawMesh, GpuObjects, RenderContext, Renderable};
 use crate::entity::core::resource::Resources;
+use crate::entity::systems::camera::{Camera, CameraAnimator, CameraSystem};
 use crate::entity::texture::Texture;
-use crate::helpers::animation::AnimationHandler;
+use crate::helpers::animation::{AnimationHandler, Interpolation};
 
 pub enum DeviceBackend {
     WebGL,
@@ -184,16 +189,20 @@ impl State {
         let arguments = Arguments {
             args: HashMap::new(),
         };
-        let engine = Engine {
+        let mut engine = Engine {
             render_context,
             arguments,
             frame_count: 0,
             time_acc: Duration::ZERO,
             render_commands: Vec::new(),
+            audio_handler: None,
+            audio_triggers: None,
         };
 
         // post_processing.new_effect(size, surface_format, Effect::ChromaticTwo);
 
+        //We cant initialize audio in the browser before a user has interacted with the website.
+        //Therefor we have to only instantiate the audio handler when in native
         Self {
             surface,
             surface_configured: false,
@@ -252,11 +261,11 @@ impl State {
             self.surface_configured = false;
         }
     }
-    // pub fn input(&mut self, event: &WindowEvent) {
-    //     // if let Some(game_loop) = self.game_loop.as_mut() {
-    //     //     game_loop.process_event(event, &self.size);
-    //     // }
-    // }
+    pub fn input(&mut self, event: &WindowEvent) {
+        if let Some(audio_handler) = self.engine.audio_handler.as_mut() {
+            audio_handler.update_from_keypress(event);
+        }
+    }
     //
     pub fn update(&mut self, dt: std::time::Duration) {
         self.engine.frame_count += 1;
@@ -297,12 +306,21 @@ impl State {
                     .instance_controllers
                     .get_mut(renderable.instance_controller_handle)
                     .unwrap()
-                    .update(&self.engine.render_context.queue);
+                    .update_single(&self.engine.render_context.queue);
             }
         }
+        self.world
+            .query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
+                |resources, (camera, camera_animator)| {
+                    let camera_system = resources.get_system_mut::<CameraSystem>();
+                    camera_system.update_camera(dt, &self.engine.render_context, camera);
+                    camera_animator.update(dt.as_secs_f32(), camera);
+                },
+            );
     }
 
     pub fn render(&mut self, game: &mut Box<dyn Game>) {
+        // println!("FRAME");
         if !self.surface_configured {
             return;
         }
@@ -502,6 +520,14 @@ impl State {
                     .queue
                     .submit(std::iter::once(encoder.finish()));
 
+                let mut commands = std::mem::take(&mut self.engine.render_commands);
+                for command in commands.drain(..) {
+                    match command {
+                        RenderCommands::ChangeShader(material_handle, shader) => {
+                            self.engine.change_shader_inner(&material_handle, &shader);
+                        }
+                    }
+                }
                 surface_texture.present();
             }
             CurrentSurfaceTexture::Suboptimal(surface_texture) => (),

@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod core;
 pub mod entities;
 pub mod primitive_texture;

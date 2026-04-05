@@ -28,6 +28,10 @@ egui-winit = { version = "0.34", default-features = false }
 indexmap = "2.13"
 hecs = "0.11"
 slotmap = "1.1"
+cpal = { version = "0.17", features = ["wasm-bindgen"] }
+heapless = "0.9"
+# [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# cpal = "0.17"
 
 [dependencies.image]
 version = "0.25"
@@ -47,7 +51,7 @@ web-time = "1.1"
 rand = { version = "0.9" }
 js-sys = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
-
+libm = "0.2"
 [build-dependencies]
 anyhow = "1.0"
 fs_extra = "1.2"

@@ -130,6 +130,9 @@ where
             if let Some(mut game_loop) = self.game_loop.take() {
                 let mut state = pollster::block_on(State::new(window.clone()));
                 game_loop.setup(&mut state);
+                //INFO: to initiate sound in WASM scenarios, you must call this function from a
+                //user input in the browser. Otherwise it wont launch
+                state.engine.init_sound(0.6, 1.2);
 
                 self.state = Some(state);
                 self.game_loop = Some(game_loop);
@@ -204,10 +207,11 @@ where
             WindowEvent::RedrawRequested => {
                 let dt = self.last_time.elapsed();
                 self.last_time = web_time::Instant::now();
-                state.update(dt);
-                game.update(dt, &mut state.engine, &mut state.world);
-
                 state.render(game);
+
+                state.update(dt);
+
+                game.update(dt, &mut state.engine, &mut state.world);
             }
 
             WindowEvent::Resized(size) => {
@@ -216,6 +220,7 @@ where
             }
 
             _ => {
+                state.input(&event);
                 game.process_event(&event, &state.size, &mut state.engine, &mut state.world);
             }
         }

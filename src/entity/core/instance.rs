@@ -48,8 +48,9 @@ where
         rc.gpu_objects.instance_controllers.insert(Box::new(ic))
     }
 }
-pub trait InstanceControllerTrait: Send + Sync {
+pub trait InstanceControllerTrait {
     fn update(&self, queue: &wgpu::Queue);
+    fn update_single(&self, queue: &wgpu::Queue);
 
     fn buffer(&self) -> &wgpu::Buffer;
     fn layout(&self) -> &VertexBufferLayoutOwned;
@@ -62,6 +63,37 @@ impl<T> InstanceControllerTrait for InstanceController<T>
 where
     T: InstanceToRaw + bytemuck::Pod + Send + Sync,
 {
+    fn update_single(&self, queue: &wgpu::Queue) {
+        let pending = Arc::clone(&self.pending);
+        let instances = Arc::clone(&self.instances);
+        let count_clone = Arc::clone(&self.atomic_usize);
+
+        let mut pending = pending.lock().unwrap();
+
+        pending.clear();
+        pending.extend(
+            instances
+                .read()
+                .unwrap()
+                .iter()
+                .filter(|i| i.should_render)
+                .map(T::to_raw),
+        );
+
+        count_clone.store(pending.len(), std::sync::atomic::Ordering::Relaxed);
+
+        let chunk_size = 10_000;
+        let stride = std::mem::size_of::<T>();
+
+        for (i, chunk) in pending.chunks(chunk_size).enumerate() {
+            queue.write_buffer(
+                &self.instance_buffer,
+                (i * chunk_size * stride) as u64,
+                bytemuck::cast_slice(chunk),
+            );
+        }
+    }
+
     fn update(&self, queue: &wgpu::Queue) {
         let pending = Arc::clone(&self.pending);
         let instances = Arc::clone(&self.instances);
