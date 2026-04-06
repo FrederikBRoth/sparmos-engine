@@ -1,27 +1,24 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::vec;
 
-use cpal::traits::{DeviceTrait, HostTrait};
+#[cfg(feature = "gui")]
+use egui::Ui;
 use wgpu::{CurrentSurfaceTexture, InstanceDescriptor};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
-use winit::keyboard::KeyCode;
 use winit::window::Window;
 
 use crate::application::gui::EguiRenderer;
-use crate::entity::audio::audio_handler::{self, AudioHandler, pianokey_to_hz};
-use crate::entity::audio::synth::{EnvelopeSegment, Sound};
-use crate::entity::core::engine::{self, Arguments, Engine, RenderCommands};
+use crate::entity::core::engine::{Arguments, Engine, RenderCommands};
 use crate::entity::core::entities::World;
-use crate::entity::core::post_processing::{self, Effect, PostProcessHandler};
-use crate::entity::core::render::{self, DrawMesh, GpuObjects, RenderContext, Renderable};
+use crate::entity::core::post_processing::PostProcessHandler;
+use crate::entity::core::render::{DrawMesh, GpuObjects, RenderContext, Renderable};
 use crate::entity::core::resource::Resources;
 use crate::entity::systems::camera::{Camera, CameraAnimator, CameraSystem};
 use crate::entity::texture::Texture;
-use crate::helpers::animation::{AnimationHandler, Interpolation};
+use crate::helpers::animation::AnimationHandler;
 
 pub enum DeviceBackend {
     WebGL,
@@ -57,7 +54,7 @@ pub trait Game {
     fn setup(&mut self, state: &mut State);
 
     #[cfg(feature = "gui")]
-    fn gui_setup(&mut self, egui_renderer: &EguiRenderer);
+    fn gui_setup(&mut self, ui: &mut Ui);
 }
 
 impl State {
@@ -165,7 +162,7 @@ impl State {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        let mut post_processing = PostProcessHandler::new(Arc::clone(&device), Arc::clone(&queue));
+        let post_processing = PostProcessHandler::new(Arc::clone(&device), Arc::clone(&queue));
 
         let overscan_size = PhysicalSize::new(
             (size.width as f32 * 1.1) as u32,
@@ -189,7 +186,7 @@ impl State {
         let arguments = Arguments {
             args: HashMap::new(),
         };
-        let mut engine = Engine {
+        let engine = Engine {
             render_context,
             arguments,
             frame_count: 0,
@@ -389,7 +386,7 @@ impl State {
                         render_pass.draw_scene(&self.backend, &self.engine, &self.world);
                     }
 
-                    while let Some((key, post_process)) = post_processes.next() {
+                    while let Some((_, post_process)) = post_processes.next() {
                         //There are no "extra post processes". Go to screen render
                         let next_pp = post_processes.peek();
                         match next_pp {
@@ -503,8 +500,9 @@ impl State {
                         pixels_per_point: self.window.scale_factor() as f32,
                     };
 
-                    self.egui_renderer.begin_frame(&self.window);
-                    game.gui_setup(&self.egui_renderer);
+                    let full_output = self.egui_renderer.start_gui(&self.window, |ui| {
+                        game.gui_setup(ui);
+                    });
                     self.egui_renderer.end_frame_and_draw(
                         &self.engine.render_context.device,
                         &self.engine.render_context.queue,
@@ -512,6 +510,7 @@ impl State {
                         &self.window,
                         &view,
                         screen_descriptor,
+                        full_output,
                     );
                 }
 
@@ -530,7 +529,7 @@ impl State {
                 }
                 surface_texture.present();
             }
-            CurrentSurfaceTexture::Suboptimal(surface_texture) => (),
+            CurrentSurfaceTexture::Suboptimal(_) => (),
             CurrentSurfaceTexture::Timeout => (),
             CurrentSurfaceTexture::Occluded => (),
             CurrentSurfaceTexture::Outdated => (),

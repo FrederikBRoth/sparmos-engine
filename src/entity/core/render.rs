@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, atomic::Ordering},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use slotmap::{SlotMap, new_key_type};
 use wgpu::ShaderModule;
@@ -10,12 +7,8 @@ use crate::{
     application::state::DeviceBackend,
     entity::{
         core::{
-            engine::Engine,
-            entities::World,
-            geometry::Mesh,
-            instance::{InstanceController, InstanceControllerTrait, InstanceToRaw},
-            material::{Material, MaterialBuilder},
-            post_processing::PostProcessHandler,
+            engine::Engine, entities::World, geometry::Mesh, instance::InstanceControllerTrait,
+            material::Material, post_processing::PostProcessHandler,
         },
         texture::TextureSampleView,
     },
@@ -126,8 +119,8 @@ impl GpuObjects {
 //The two structs below might look identical, but the render item is useful for the render pipeline
 //iterating through refences is faster if we need multi pass rendering for shados etc.
 //
-pub struct RenderItem<'a> {
-    mesh: &'a Mesh,
-    instance_controller: &'a Box<dyn InstanceControllerTrait>,
-    material: &'a Material,
-}
+// pub struct RenderItem<'a> {
+//     mesh: &'a Mesh,
+//     instance_controller: &'a Box<dyn InstanceControllerTrait>,
+//     material: &'a Material,
+// }

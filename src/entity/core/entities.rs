@@ -60,7 +60,7 @@ impl World {
     {
         let world = &mut self.entities;
 
-        let mut query = world.query::<B>();
+        let query = world.query::<B>();
 
         f(query);
     }
@@ -72,7 +72,7 @@ impl World {
     {
         let world = &mut self.entities;
 
-        let mut query = world.query::<B>();
+        let query = world.query::<B>();
 
         f(&mut self.resources, query);
     }

@@ -1,4 +1,4 @@
-use egui::{Context, ViewportId};
+use egui::{Context, FullOutput, Ui, ViewportId};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 use egui_winit::State;
 use wgpu::{CommandEncoder, Device, Queue, StoreOp, TextureFormat, TextureView};
@@ -56,10 +56,17 @@ impl EguiRenderer {
         self.context().set_pixels_per_point(v);
     }
 
-    pub fn begin_frame(&mut self, window: &Window) {
+    pub fn start_gui<F>(&mut self, window: &Window, mut ui_function: F) -> FullOutput
+    where
+        F: FnMut(&mut Ui),
+    {
         let raw_input = self.state.take_egui_input(window);
-        self.state.egui_ctx().begin_pass(raw_input);
+        let full_output = self
+            .state
+            .egui_ctx()
+            .run_ui(raw_input, |ui| ui_function(ui));
         self.frame_started = true;
+        full_output
     }
 
     pub fn end_frame_and_draw(
@@ -70,14 +77,13 @@ impl EguiRenderer {
         window: &Window,
         window_surface_view: &TextureView,
         screen_descriptor: ScreenDescriptor,
+        full_output: FullOutput,
     ) {
         if !self.frame_started {
             panic!("begin_frame must be called before end_frame_and_draw can be called!");
         }
 
         self.ppp(screen_descriptor.pixels_per_point);
-
-        let full_output = self.state.egui_ctx().end_pass();
 
         self.state
             .handle_platform_output(window, full_output.platform_output);

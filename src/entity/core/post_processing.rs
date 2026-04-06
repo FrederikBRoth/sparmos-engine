@@ -1,9 +1,7 @@
-use std::{collections::binary_heap, str::RSplitTerminator, sync::Arc};
+use std::sync::Arc;
 
 use indexmap::IndexMap;
-use wgpu::{
-    BindGroup, BindGroupLayout, Device, Queue, RenderPipeline, Texture, TextureFormat, TextureView,
-};
+use wgpu::{BindGroup, Device, Queue, RenderPipeline, TextureFormat, TextureView};
 use winit::dpi::PhysicalSize;
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy)]
@@ -21,7 +19,7 @@ pub struct PostProcess {
 
 pub struct PostProcessHandler {
     device: Arc<Device>,
-    queue: Arc<Queue>,
+    _queue: Arc<Queue>,
     pub post_processes: IndexMap<Effect, PostProcess>,
 }
 
@@ -29,7 +27,7 @@ impl PostProcessHandler {
     pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Self {
         Self {
             device,
-            queue,
+            _queue: queue,
             post_processes: IndexMap::new(),
         }
     }

@@ -1,26 +1,16 @@
-use std::{
-    any::Any,
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-};
+use std::{any::Any, collections::HashMap};
 
-use hecs::{DynamicBundle, Entity, Query, World};
-use winit::keyboard::KeyCode;
-
-use crate::{
-    entity::{
-        audio::{audio_handler::AudioHandler, synth::Sound},
-        core::{
-            geometry::Mesh,
-            instance::InstanceControllerTrait,
-            material::Material,
-            render::{
-                InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext, Renderable,
-            },
-            resource::{Resources, System},
-        },
+use crate::entity::{
+    audio::{
+        audio_handler::{AudioHandler, AudioTrigger},
+        synth::Sound,
     },
-    helpers::animation::AnimationHandler,
+    core::{
+        geometry::Mesh,
+        instance::InstanceControllerTrait,
+        material::Material,
+        render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
+    },
 };
 
 pub enum RenderCommands {
@@ -49,7 +39,7 @@ pub struct Engine {
     pub render_context: RenderContext,
     pub arguments: Arguments,
     pub audio_handler: Option<AudioHandler>,
-    pub audio_triggers: Option<HashMap<KeyCode, Sound>>,
+    pub audio_triggers: Option<HashMap<AudioTrigger, Sound>>,
 }
 
 impl Engine {

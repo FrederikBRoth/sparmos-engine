@@ -1,6 +1,6 @@
 use cgmath::{EuclideanSpace, Point3, Vector3, num_traits::pow, vec3};
 
-use crate::entity::core::instance::{Instance, InstanceController, InstanceControllerTrait};
+use crate::entity::core::instance::Instance;
 
 pub enum TransitionType {
     Overwrite,
@@ -16,12 +16,31 @@ pub fn get_height_color(height: f32) -> Vector3<f32> {
     let high_color = Vector3::new(0.953, 0.406, 0.674);
     low_color + (high_color - low_color) * height
 }
-#[derive(Copy, Clone)]
+pub fn castaljau_point(points: &[egui::Pos2], t: f32) -> egui::Pos2 {
+    if points.len() == 1 {
+        return points[0];
+    } else {
+        let mut new_points: Vec<egui::Pos2> = Vec::with_capacity(points.len() - 1);
+        for i in 0..points.len() - 1 {
+            let p0 = points[i];
+            let p1 = points[i + 1];
+
+            new_points.push(egui::Pos2 {
+                x: (1.0 - t) * p0.x + t * p1.x,
+                y: (1.0 - t) * p0.y + t * p1.y,
+            });
+        }
+        castaljau_point(&new_points, t)
+    }
+}
+
+#[derive(Clone)]
 pub enum Interpolation {
     EaseOut,
     EaseInEaseOut,
     EaseInEaseOutLoop,
     Linear,
+    Custom(Vec<egui::Pos2>),
 }
 
 impl Interpolation {
@@ -54,6 +73,7 @@ impl Interpolation {
                 1.0 - (1.0 - t).powi(3)
             }
             Interpolation::Linear => t.clamp(0.0, 1.0),
+            Interpolation::Custom(point2s) => castaljau_point(&point2s, t).x,
         }
     }
     pub fn lerp(&self, t: f32) -> f32 {
@@ -82,6 +102,7 @@ impl Interpolation {
                 1.0 - (1.0 - t).powi(3)
             }
             Interpolation::Linear => t.clamp(0.0, 1.0),
+            Interpolation::Custom(point2s) => castaljau_point(&point2s, t).x,
         }
     }
 }
@@ -98,7 +119,7 @@ pub struct AnimationPersistent {
     pub speed: f32,
     pub time: f32,
     movement_vector: Vector3<f32>,
-    animation_transition: Interpolation,
+    _animation_transition: Interpolation,
 }
 impl AnimationPersistent {
     pub fn new(movement_vector: Vector3<f32>, animation_transition: Interpolation) -> Self {
@@ -107,7 +128,7 @@ impl AnimationPersistent {
             speed: 1.0,
             amplitude: 1.0,
             movement_vector,
-            animation_transition,
+            _animation_transition: animation_transition,
         }
     }
 

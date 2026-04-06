@@ -3080,7 +3080,6 @@ dependencies = [
  "image",
  "indexmap",
  "js-sys",
- "libm",
  "log",
  "pollster",
  "rand",

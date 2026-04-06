@@ -1,6 +1,4 @@
-use std::collections::HashSet;
-
-use cgmath::{InnerSpace, Point3, Vector2, Vector3};
+use cgmath::{InnerSpace, Point3, Vector3};
 
 use crate::entity::core::geometry::PrimitiveVertex;
 

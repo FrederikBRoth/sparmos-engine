@@ -1,25 +1,13 @@
 use heapless::spsc::{Consumer, Producer, Queue};
 
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    rc::Rc,
-    sync::{
-        Arc, Mutex,
-        mpsc::{self, Receiver, Sender},
-    },
-    time::Instant,
-};
+use std::collections::HashMap;
 
-use cgmath::num_traits::Float;
 use cpal::{
     Stream, StreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use egui::emath::normalized_angle;
-use egui_winit::process_viewport_commands;
 use winit::{
-    event::{ElementState, KeyEvent, WindowEvent},
+    event::{KeyEvent, WindowEvent},
     keyboard::KeyCode,
 };
 
@@ -27,12 +15,13 @@ use crate::{
     application::state::State,
     entity::audio::synth::{AudioState, Sound},
 };
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Hash)]
 pub enum AudioTrigger {
     Keyboard(KeyCode),
     GameLogic(String),
 }
-enum AudioCommand {
+pub enum AudioCommand {
+    ForcePlay(AudioTrigger),
     Play(AudioTrigger),
     Stop(AudioTrigger),
     Edit(AudioTrigger, Sound),
@@ -40,12 +29,12 @@ enum AudioCommand {
 const QUEUE_SIZE: usize = 128;
 
 pub struct AudioHandler {
-    audio_stream: Stream,
+    _audio_stream: Stream,
     producer: Producer<'static, AudioCommand>,
 }
 
 pub struct AudioEngine {
-    audio_triggers: HashMap<KeyCode, Sound>,
+    audio_triggers: HashMap<AudioTrigger, Sound>,
     limiter: Limiter,
     consumer: Consumer<'static, AudioCommand>,
 }
@@ -70,8 +59,12 @@ impl AudioHandler {
             let _ = self.producer.enqueue(cmd);
         }
     }
+    pub fn update_from_gamelogic(&mut self, command: AudioCommand) {
+        let _ = self.producer.enqueue(command);
+    }
+
     pub fn start_audio(
-        audio_triggers: HashMap<KeyCode, Sound>,
+        audio_triggers: HashMap<AudioTrigger, Sound>,
         pre_gain: f32,
         saturation: f32,
     ) -> Self {
@@ -84,8 +77,11 @@ impl AudioHandler {
 
         let channels = config.channels() as usize;
 
+        #[cfg(target_arch = "wasm32")]
         let mut config: StreamConfig = config.into();
-        //in order to have great as low latency as possible, we adjust the buffer for wasm targets
+        #[cfg(not(target_arch = "wasm32"))]
+        let config: StreamConfig = config.into();
+        //in order to have as low latency as possible, we adjust the buffer for wasm targets
         #[cfg(target_arch = "wasm32")]
         {
             config.buffer_size = cpal::BufferSize::Fixed(1024);
@@ -141,12 +137,12 @@ impl AudioHandler {
         stream.play().unwrap();
 
         AudioHandler {
-            audio_stream: stream,
+            _audio_stream: stream,
             producer,
         }
     }
 
-    pub fn init_sounds(state: &mut State, sounds: HashMap<KeyCode, Sound>) {
+    pub fn init_sounds(state: &mut State, sounds: HashMap<AudioTrigger, Sound>) {
         state.engine.audio_triggers = Some(sounds);
     }
 }
@@ -194,22 +190,30 @@ impl Limiter {
 
 fn process_audio_commands(
     consumer: &mut Consumer<AudioCommand>,
-    audio_triggers: &mut HashMap<KeyCode, Sound>,
+    audio_triggers: &mut HashMap<AudioTrigger, Sound>,
 ) {
     while let Some(cmd) = consumer.dequeue() {
         match cmd {
-            AudioCommand::Play(AudioTrigger::Keyboard(key_code)) => {
-                if let Some(sound) = audio_triggers.get_mut(&key_code) {
+            AudioCommand::Play(trigger) => {
+                if let Some(sound) = audio_triggers.get_mut(&trigger) {
                     sound.start();
                 }
             }
-            AudioCommand::Stop(AudioTrigger::Keyboard(key_code)) => {
-                if let Some(sound) = audio_triggers.get_mut(&key_code) {
+            AudioCommand::Stop(trigger) => {
+                if let Some(sound) = audio_triggers.get_mut(&trigger) {
                     sound.release();
                 }
             }
-            AudioCommand::Edit(_, _) => {}
-            _ => {}
+            AudioCommand::Edit(trigger, s) => {
+                if audio_triggers.contains_key(&trigger) {
+                    audio_triggers.insert(trigger, s);
+                }
+            }
+            AudioCommand::ForcePlay(trigger) => {
+                if let Some(sound) = audio_triggers.get_mut(&trigger) {
+                    sound.force_start();
+                }
+            }
         }
     }
 }

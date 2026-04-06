@@ -1,6 +1,4 @@
-use std::f32::consts::PI;
-
-const VERTICES: &[TexturedVertex] = &[
+const _VERTICES: &[TexturedVertex] = &[
     TexturedVertex {
         position: [0.0, 0.0, 0.0],
         tex_coords: [1.0, 0.0],
@@ -59,7 +57,7 @@ const VERTICES: &[TexturedVertex] = &[
 //     }
 // }
 #[rustfmt::skip]
-const INDICES: &[u16] = &[
+const _INDICES: &[u16] = &[
     //
     0, 2, 3,   0, 3, 1, // front
     4, 6, 7,   4, 7, 5, // back

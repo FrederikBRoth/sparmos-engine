@@ -8,13 +8,13 @@ pub enum AudioState {
     Stopped,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct EnvelopeSegment {
     pub interpolation: Interpolation,
     pub length: f32,
 }
 impl From<(Interpolation, f32, f32)> for EnvelopeSegment {
-    fn from((interpolation, length, target): (Interpolation, f32, f32)) -> Self {
+    fn from((interpolation, length, _): (Interpolation, f32, f32)) -> Self {
         Self {
             interpolation,
             length,
@@ -31,7 +31,7 @@ impl Default for EnvelopeSegment {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Envelope {
     pub gain: f32,
     pub prev_gain: f32,
@@ -168,6 +168,11 @@ impl Sound {
             self.envelope.elapsed = 0.0;
             self.envelope.prev_gain = self.envelope.gain;
         }
+    }
+    pub fn force_start(&mut self) {
+        self.envelope.audio_state = AudioState::Playing;
+        self.envelope.elapsed = 0.0;
+        self.envelope.prev_gain = self.envelope.gain;
     }
 
     pub fn release(&mut self) {

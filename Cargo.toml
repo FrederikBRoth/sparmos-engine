@@ -51,7 +51,6 @@ web-time = "1.1"
 rand = { version = "0.9" }
 js-sys = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
-libm = "0.2"
 [build-dependencies]
 anyhow = "1.0"
 fs_extra = "1.2"

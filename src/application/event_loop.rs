@@ -68,9 +68,9 @@ pub trait AppLifecycle<U>: 'static {
     #[cfg(target_arch = "wasm32")]
     fn on_resumed(&mut self, _event_loop: &winit::event_loop::EventLoopProxy<UserEvent<U>>) {}
     #[cfg(not(target_arch = "wasm32"))]
-    fn on_resumed(&mut self) {}
-    fn on_user_event(&mut self, proxy: &mut State, _event: U) {}
-    fn on_device_event(&mut self, event: DeviceEvent, proxy: &mut State) {}
+    fn on_resumed(&mut self);
+    fn on_user_event(&mut self, proxy: &mut State, _event: U);
+    fn on_device_event(&mut self, event: DeviceEvent, proxy: &mut State);
 }
 
 impl<U: 'static> ApplicationHandler<UserEvent<U>> for App<U>
@@ -228,8 +228,8 @@ where
 
     fn device_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
-        device_id: DeviceId,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
         event: DeviceEvent,
     ) {
         self.hooks
