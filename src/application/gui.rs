@@ -61,10 +61,11 @@ impl EguiRenderer {
         F: FnMut(&mut Ui),
     {
         let raw_input = self.state.take_egui_input(window);
-        let full_output = self
-            .state
-            .egui_ctx()
-            .run_ui(raw_input, |ui| ui_function(ui));
+        let full_output = self.state.egui_ctx().run_ui(raw_input, |ui| {
+            // let (rect, response) =
+            //     ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+            ui_function(ui);
+        });
         self.frame_started = true;
         full_output
     }

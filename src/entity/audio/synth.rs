@@ -1,10 +1,13 @@
+use cgmath::{Vector2, vec2};
+
 use crate::helpers::animation::Interpolation;
 
 // synth.rs
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum AudioState {
     Playing,
     Stopping,
+    #[default]
     Stopped,
 }
 
@@ -31,7 +34,7 @@ impl Default for EnvelopeSegment {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Envelope {
     pub gain: f32,
     pub prev_gain: f32,
@@ -79,13 +82,13 @@ impl Envelope {
                 //Attack
                 let value = if t < attack_end {
                     let x = t / self.attack.length;
-                    let interp = self.attack.interpolation.lerp(x);
-                    self.prev_gain + (1.0 - self.prev_gain) * interp
+                    let interp = self.attack.interpolation.lerp(x, false);
+                    self.prev_gain + (1.0 - self.prev_gain) * interp.0
                 //Decay
                 } else if t < decay_end {
                     let x = (t - attack_end) / self.decay.length;
-                    let interp = self.decay.interpolation.lerp(x);
-                    1.0 + (self.sustain - 1.0) * interp
+                    let interp = self.decay.interpolation.lerp(x, true);
+                    self.sustain + (1.0 - self.sustain) * interp.0
                 //Sustain
                 } else {
                     self.sustain
@@ -99,9 +102,9 @@ impl Envelope {
                 //Refrain
                 let value = if t < self.refrain.length {
                     let x = t / self.refrain.length;
-                    let interp = self.refrain.interpolation.lerp(x);
+                    let interp = self.refrain.interpolation.lerp(x, false);
 
-                    self.prev_gain * (1.0 - interp)
+                    self.prev_gain * (1.0 - interp.0)
                 } else {
                     self.audio_state = AudioState::Stopped;
                     0.0
@@ -115,12 +118,44 @@ impl Envelope {
 
     // pub fn update_
 }
+#[derive(Clone, Default)]
+pub enum Waveform {
+    #[default]
+    SineWave,
+    SquareWave,
+    TriangleWave,
+    SawtoothWave,
+}
+
+impl Waveform {
+    pub fn position(&self, phase: f32) -> f32 {
+        match self {
+            Waveform::SineWave => (phase * std::f32::consts::TAU).sin(),
+            Waveform::SquareWave => Waveform::SineWave.position(phase).signum(),
+            Waveform::TriangleWave => 2.0 * (2.0 * phase - 1.0).abs() - 1.0,
+            Waveform::SawtoothWave => 2.0 * (phase - (phase + 0.5).floor()),
+        }
+    }
+}
 #[derive(Clone)]
 pub struct Sound {
-    freq: f32,
-    phases: Vec<f32>,
-    harmonics: Vec<f32>,
+    pub freq: f32,
+    pub phases: Vec<f32>,
+    pub harmonics: Vec<f32>,
+    pub waveform: Waveform,
     pub envelope: Envelope,
+}
+
+impl Default for Sound {
+    fn default() -> Self {
+        Self {
+            freq: 440.0,
+            phases: [0.0].into(),
+            harmonics: [1.0].into(),
+            waveform: Default::default(),
+            envelope: Default::default(),
+        }
+    }
 }
 
 impl Sound {
@@ -128,6 +163,7 @@ impl Sound {
         harmonics: Vec<f32>,
         freq: f32,
         sustain: f32,
+        waveform: Waveform,
         attack: EnvelopeSegment,
         decay: EnvelopeSegment,
         refrain: EnvelopeSegment,
@@ -137,8 +173,21 @@ impl Sound {
             phases,
             freq,
             harmonics,
+            waveform,
             envelope: Envelope::new(attack, decay, refrain, sustain, AudioState::Stopped),
         }
+    }
+
+    pub fn update(&mut self, change: Sound) {
+        self.harmonics = change.harmonics;
+        self.freq = change.freq;
+        self.envelope.attack.length = change.envelope.attack.length;
+        self.envelope.decay.length = change.envelope.decay.length;
+        self.envelope.refrain.length = change.envelope.refrain.length;
+        self.envelope.attack.interpolation = change.envelope.attack.interpolation;
+        self.envelope.decay.interpolation = change.envelope.decay.interpolation;
+        self.envelope.refrain.interpolation = change.envelope.refrain.interpolation;
+        self.envelope.sustain = change.envelope.sustain;
     }
 
     pub fn set_freq(&mut self, freq: f32) {
@@ -155,9 +204,8 @@ impl Sound {
                 self.phases[index] -= 1.0;
             }
 
-            sample += ((self.phases[index] * std::f32::consts::TAU).sin() * norm)
-                * harmonic
-                * self.envelope.gain
+            sample +=
+                self.waveform.position(self.phases[index]) * norm * harmonic * self.envelope.gain
         }
         sample
     }
@@ -188,5 +236,18 @@ impl Sound {
         self.envelope.advance(dt);
         self.next(dt)
         // println!("gain: {}", self.envelope.gain)
+    }
+
+    pub fn duration(&self) -> f32 {
+        self.envelope.attack.length + self.envelope.refrain.length + self.envelope.decay.length
+    }
+
+    pub fn get_envelope_bounds(&self) -> (Vector2<f32>, Vector2<f32>) {
+        let attack_bounds = vec2(0.0, self.envelope.attack.length);
+        let decay_bounds = vec2(
+            self.envelope.attack.length,
+            self.envelope.attack.length + self.envelope.decay.length,
+        );
+        (attack_bounds, decay_bounds)
     }
 }

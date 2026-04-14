@@ -9,10 +9,6 @@ use winit::{
 use crate::application::state::{Game, State};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{JsCast, closure::Closure};
-#[cfg(target_arch = "wasm32")]
-use web_sys::{Event, KeyboardEvent};
 
 pub enum EngineEvent {
     StateReady { state: State, game: Box<dyn Game> },
@@ -114,7 +110,7 @@ where
 
                 state.window().request_redraw();
 
-                value
+                let _ = value
                     .send_event(UserEvent::EngineEvent(EngineEvent::StateReady {
                         state,
                         game,
@@ -183,9 +179,10 @@ where
             self.is_focused = focused;
 
             if focused {
-                state.render(game);
-
                 self.last_time = web_time::Instant::now();
+                let dt = self.last_time.elapsed();
+
+                state.render(dt, game);
             }
         }
 
@@ -207,7 +204,7 @@ where
             WindowEvent::RedrawRequested => {
                 let dt = self.last_time.elapsed();
                 self.last_time = web_time::Instant::now();
-                state.render(game);
+                state.render(dt, game);
 
                 state.update(dt);
 

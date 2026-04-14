@@ -112,4 +112,8 @@ impl Engine {
             AudioHandler::start_audio(self.audio_triggers.take().unwrap(), pre_gain, post_gain);
         self.audio_handler = Some(audio_handler);
     }
+
+    pub fn get_audio_handler(&mut self) -> &mut AudioHandler {
+        self.audio_handler.as_mut().unwrap()
+    }
 }

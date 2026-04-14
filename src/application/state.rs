@@ -54,7 +54,7 @@ pub trait Game {
     fn setup(&mut self, state: &mut State);
 
     #[cfg(feature = "gui")]
-    fn gui_setup(&mut self, ui: &mut Ui);
+    fn gui_setup(&mut self, dt: std::time::Duration, engine: &mut Engine, ui: &mut Ui);
 }
 
 impl State {
@@ -316,7 +316,7 @@ impl State {
             );
     }
 
-    pub fn render(&mut self, game: &mut Box<dyn Game>) {
+    pub fn render(&mut self, dt: std::time::Duration, game: &mut Box<dyn Game>) {
         // println!("FRAME");
         if !self.surface_configured {
             return;
@@ -501,7 +501,7 @@ impl State {
                     };
 
                     let full_output = self.egui_renderer.start_gui(&self.window, |ui| {
-                        game.gui_setup(ui);
+                        game.gui_setup(dt, &mut self.engine, ui);
                     });
                     self.egui_renderer.end_frame_and_draw(
                         &self.engine.render_context.device,

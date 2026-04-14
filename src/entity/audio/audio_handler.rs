@@ -1,4 +1,5 @@
 use heapless::spsc::{Consumer, Producer, Queue};
+use image::imageops::sample_nearest;
 
 use std::collections::HashMap;
 
@@ -15,21 +16,32 @@ use crate::{
     application::state::State,
     entity::audio::synth::{AudioState, Sound},
 };
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum AudioTrigger {
     Keyboard(KeyCode),
     GameLogic(String),
+}
+
+impl AudioTrigger {
+    pub fn gamelogic(name: &str) -> Self {
+        AudioTrigger::GameLogic(name.to_string())
+    }
+    pub fn keyboard(keycode: KeyCode) -> Self {
+        AudioTrigger::Keyboard(keycode)
+    }
 }
 pub enum AudioCommand {
     ForcePlay(AudioTrigger),
     Play(AudioTrigger),
     Stop(AudioTrigger),
     Edit(AudioTrigger, Sound),
+    Add(AudioTrigger, Sound),
 }
 const QUEUE_SIZE: usize = 128;
 
 pub struct AudioHandler {
     _audio_stream: Stream,
+    pub sample_rate: f32,
     producer: Producer<'static, AudioCommand>,
 }
 
@@ -138,6 +150,7 @@ impl AudioHandler {
 
         AudioHandler {
             _audio_stream: stream,
+            sample_rate: sample_rate,
             producer,
         }
     }
@@ -205,13 +218,18 @@ fn process_audio_commands(
                 }
             }
             AudioCommand::Edit(trigger, s) => {
-                if audio_triggers.contains_key(&trigger) {
-                    audio_triggers.insert(trigger, s);
+                if let Some(sound) = audio_triggers.get_mut(&trigger) {
+                    sound.update(s);
                 }
             }
             AudioCommand::ForcePlay(trigger) => {
                 if let Some(sound) = audio_triggers.get_mut(&trigger) {
                     sound.force_start();
+                }
+            }
+            AudioCommand::Add(trigger, sound) => {
+                if !audio_triggers.contains_key(&trigger) {
+                    audio_triggers.insert(trigger, sound);
                 }
             }
         }
