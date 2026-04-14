@@ -34,9 +34,10 @@ pub fn castaljau_point(points: &[egui::Pos2], t: f32) -> egui::Pos2 {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub enum Interpolation {
     EaseOut,
+    #[default]
     EaseInEaseOut,
     EaseInEaseOutLoop,
     Linear,
@@ -76,15 +77,17 @@ impl Interpolation {
             Interpolation::Custom(point2s) => castaljau_point(&point2s, t).x,
         }
     }
-    pub fn lerp(&self, t: f32) -> f32 {
+    pub fn lerp(&self, t: f32, reversed: bool) -> (f32, f32) {
         match self {
             Interpolation::EaseInEaseOut => {
                 let number = t.clamp(0.0, 1.0);
-                if number < 0.5 {
+                let x = if number < 0.5 {
                     4.0 * number * number * number
                 } else {
                     1.0 - pow(-2.0 * number + 2.0, 3) / 2.0
-                }
+                };
+
+                if reversed { (1.0 - x, 0.0) } else { (x, 0.0) }
             }
             Interpolation::EaseInEaseOutLoop => {
                 let freq = 1.0;
@@ -95,14 +98,23 @@ impl Interpolation {
                     elapsed / freq
                 };
                 let sqr = time * time;
-                (sqr / (2.0 * (sqr - time) + 1.0)) - 0.5
+                let x = (sqr / (2.0 * (sqr - time) + 1.0)) - 0.5;
+
+                if reversed { (1.0 - x, 0.0) } else { (x, 0.0) }
             }
             Interpolation::EaseOut => {
                 let t = t.clamp(0.0, 1.0);
-                1.0 - (1.0 - t).powi(3)
+                let x = 1.0 - (1.0 - t).powi(3);
+                if reversed { (1.0 - x, 0.0) } else { (x, 0.0) }
             }
-            Interpolation::Linear => t.clamp(0.0, 1.0),
-            Interpolation::Custom(point2s) => castaljau_point(&point2s, t).x,
+            Interpolation::Linear => {
+                let x = t.clamp(0.0, 1.0);
+                if reversed { (1.0 - x, 0.0) } else { (x, 0.0) }
+            }
+            Interpolation::Custom(point2s) => {
+                let point = castaljau_point(&point2s, t);
+                (point.x, point.y)
+            }
         }
     }
 }
