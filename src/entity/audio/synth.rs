@@ -180,6 +180,9 @@ impl Sound {
 
     pub fn update(&mut self, change: Sound) {
         self.harmonics = change.harmonics;
+        if change.phases.len() > self.phases.len() {
+            self.phases.resize(change.phases.len(), Default::default());
+        }
         self.freq = change.freq;
         self.envelope.attack.length = change.envelope.attack.length;
         self.envelope.decay.length = change.envelope.decay.length;

@@ -252,7 +252,22 @@ pub fn pianokey_to_hz(key: &str) -> Option<f32> {
 
     let index = key_index + octave * 12;
 
-    let n = index - 8;
+    let n = index;
 
-    Some(440.0 * 2f32.powf((n as f32 - 49.0) / 12.0))
+    Some(440.0 * 2f32.powf((n as f32 - 57.0) / 12.0))
+}
+
+pub fn index_to_key(index: usize) -> String {
+    let key = KEYS[index % 12];
+    let octave = index / 12;
+    format!("{}{}", key, octave)
+}
+pub fn hz_to_index(freq: f32) -> usize {
+    (57.0 + 12.0 * (freq / 440.0).log2())
+        .round()
+        .clamp(0.0, 90.0) as usize
+}
+pub fn index_to_hz(index: usize) -> f32 {
+    let n = index as f32;
+    440.0 * 2f32.powf((n - 57.0) / 12.0)
 }
