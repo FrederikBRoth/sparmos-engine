@@ -1,3 +1,5 @@
+use std::fmt;
+
 use cgmath::{Vector2, vec2};
 
 use crate::helpers::animation::Interpolation;
@@ -118,7 +120,7 @@ impl Envelope {
 
     // pub fn update_
 }
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub enum Waveform {
     #[default]
     SineWave,
@@ -144,6 +146,22 @@ pub struct Sound {
     pub harmonics: Vec<f32>,
     pub waveform: Waveform,
     pub envelope: Envelope,
+}
+
+impl fmt::Display for Sound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Frequency: {:.2} Hz, Waveform: {:?}, Harmonics: {:?}, Envelope lengths (ADSR): {}, {}, {}, {}",
+            self.freq,
+            self.waveform,
+            self.harmonics,
+            self.envelope.attack.length,
+            self.envelope.decay.length,
+            self.envelope.sustain,
+            self.envelope.refrain.length,
+        )
+    }
 }
 
 impl Default for Sound {
