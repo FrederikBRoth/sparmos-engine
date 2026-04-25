@@ -1,6 +1,6 @@
 use std::{any::Any, collections::HashMap};
 
-use crate::entity::{
+use crate::{
     audio::{
         audio_handler::{AudioHandler, AudioTrigger},
         synth::Sound,

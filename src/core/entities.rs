@@ -3,7 +3,7 @@ use std::sync::Arc;
 use hecs::{DynamicBundle, Entity, Query, QueryBorrow};
 use wgpu::Device;
 
-use crate::entity::core::resource::{Resources, System};
+use crate::core::resource::{Resources, System};
 
 pub struct World {
     pub device: Arc<Device>,

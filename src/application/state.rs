@@ -11,14 +11,14 @@ use winit::event::WindowEvent;
 use winit::window::Window;
 
 use crate::application::gui::EguiRenderer;
-use crate::entity::core::engine::{Arguments, Engine, RenderCommands};
-use crate::entity::core::entities::World;
-use crate::entity::core::post_processing::PostProcessHandler;
-use crate::entity::core::render::{DrawMesh, GpuObjects, RenderContext, Renderable};
-use crate::entity::core::resource::Resources;
-use crate::entity::systems::camera::{Camera, CameraAnimator, CameraSystem};
-use crate::entity::texture::Texture;
-use crate::helpers::animation::AnimationHandler;
+use crate::core::engine::{Arguments, Engine, RenderCommands};
+use crate::core::entities::World;
+use crate::core::post_processing::PostProcessHandler;
+use crate::core::render::{DrawMesh, GpuObjects, RenderContext, Renderable};
+use crate::core::resource::Resources;
+use crate::core::texture::Texture;
+use crate::systems::animation::AnimationHandler;
+use crate::systems::camera::{Camera, CameraAnimator, CameraSystem};
 
 pub enum DeviceBackend {
     WebGL,

@@ -5,12 +5,9 @@ use wgpu::ShaderModule;
 
 use crate::{
     application::state::DeviceBackend,
-    entity::{
-        core::{
-            engine::Engine, entities::World, geometry::Mesh, instance::InstanceControllerTrait,
-            material::Material, post_processing::PostProcessHandler,
-        },
-        texture::TextureSampleView,
+    core::{
+        engine::Engine, entities::World, geometry::Mesh, instance::InstanceControllerTrait,
+        material::Material, post_processing::PostProcessHandler, texture::TextureSampleView,
     },
 };
 

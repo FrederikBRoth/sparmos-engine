@@ -1,6 +1,9 @@
 pub mod application;
-pub mod entity;
+pub mod audio;
+pub mod core;
+pub mod entities;
 pub mod helpers;
+pub mod systems;
 pub use cgmath;
 pub use egui;
 pub use hecs;

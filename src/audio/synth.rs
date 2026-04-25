@@ -2,7 +2,7 @@ use std::fmt;
 
 use cgmath::{Vector2, vec2};
 
-use crate::helpers::animation::Interpolation;
+use crate::systems::animation::Interpolation;
 
 // synth.rs
 #[derive(Clone, Copy, PartialEq, Eq, Default)]

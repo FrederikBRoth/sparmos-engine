@@ -1,7 +1,7 @@
 use std::mem;
 use wgpu::util::DeviceExt;
 
-use crate::entity::core::render::{MeshHandle, RenderContext};
+use crate::core::render::{MeshHandle, RenderContext};
 #[derive(Clone)]
 pub struct VertexBufferLayoutOwned {
     pub array_stride: u64,

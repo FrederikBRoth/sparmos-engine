@@ -67,7 +67,7 @@ const _INDICES: &[u16] = &[
     1, 3, 5,   1, 5, 7  // top
 ];
 
-use crate::entity::core::geometry::{Primitive, PrimitiveVertex, TexturedVertex};
+use crate::core::geometry::{Primitive, PrimitiveVertex, TexturedVertex};
 
 pub fn new() -> Primitive {
     let face_color = [1.0, 0.0, 1.0];

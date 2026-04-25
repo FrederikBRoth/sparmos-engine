@@ -1,6 +1,6 @@
 use cgmath::{EuclideanSpace, Point3, Vector3, num_traits::pow, vec3};
 
-use crate::entity::core::instance::Instance;
+use crate::core::instance::Instance;
 
 pub enum TransitionType {
     Overwrite,

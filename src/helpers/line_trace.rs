@@ -1,6 +1,6 @@
 use cgmath::{InnerSpace, Point3, Vector3};
 
-use crate::entity::core::geometry::PrimitiveVertex;
+use crate::core::geometry::PrimitiveVertex;
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(

@@ -30,6 +30,7 @@ hecs = "0.11"
 slotmap = "1.1"
 cpal = { version = "0.17", features = ["wasm-bindgen"] }
 heapless = "0.9"
+midly = "0.5"
 # [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # cpal = "0.17"
 

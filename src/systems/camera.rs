@@ -10,14 +10,12 @@ use winit::{
 };
 
 use crate::{
-    entity::core::{
+    core::{
         render::RenderContext,
         resource::{GpuBindable, System},
     },
-    helpers::{
-        animation::{AnimationHandler, AnimationType},
-        line_trace::OPENGL_TO_WGPU_MATRIX,
-    },
+    helpers::line_trace::OPENGL_TO_WGPU_MATRIX,
+    systems::animation::{AnimationHandler, AnimationType},
 };
 
 pub struct CameraAnimator {

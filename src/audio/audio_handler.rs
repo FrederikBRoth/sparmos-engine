@@ -1,4 +1,7 @@
-use heapless::spsc::{Consumer, Producer, Queue};
+use heapless::{
+    spsc::{Consumer, Producer, Queue},
+    vec,
+};
 use image::imageops::sample_nearest;
 
 use std::collections::HashMap;
@@ -14,7 +17,8 @@ use winit::{
 
 use crate::{
     application::state::State,
-    entity::audio::synth::{AudioState, Sound},
+    audio::synth::{AudioState, EnvelopeSegment, Sound, Waveform},
+    systems::animation::Interpolation,
 };
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub enum AudioTrigger {
@@ -270,4 +274,32 @@ pub fn hz_to_index(freq: f32) -> usize {
 pub fn index_to_hz(index: usize) -> f32 {
     let n = index as f32;
     440.0 * 2f32.powf((n - 57.0) / 12.0)
+}
+
+pub fn get_full_piano() -> Vec<Sound> {
+    let mut sounds = vec![];
+
+    let harmonics = [1.00, 0.30, 0.10, 0.05, 0.10, 0.7, 0.02];
+    for key in 0..88 {
+        let freq = index_to_hz(key);
+        sounds.push(Sound::new(
+            harmonics.into(),
+            freq,
+            0.0,
+            Waveform::SineWave,
+            EnvelopeSegment {
+                length: 0.01,
+                interpolation: Interpolation::EaseInEaseOut,
+            },
+            EnvelopeSegment {
+                interpolation: Interpolation::EaseInEaseOut,
+                length: 1.98,
+            },
+            EnvelopeSegment {
+                length: 0.1,
+                ..Default::default()
+            },
+        ));
+    }
+    sounds
 }

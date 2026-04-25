@@ -1,6 +1,6 @@
 use cgmath::Vector3;
 
-use crate::entity::core::{
+use crate::core::{
     buffer::{Buffer, BufferType},
     resource::{GpuBindable, System},
 };

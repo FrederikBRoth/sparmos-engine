@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, RwLock, atomic::AtomicUsize};
 
 use cgmath::Rotation3;
 
-use crate::entity::core::{
+use crate::core::{
     geometry::VertexBufferLayoutOwned,
     render::{InstanceControllerHandle, RenderContext},
 };

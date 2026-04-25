@@ -7,3 +7,4 @@ pub mod material;
 pub mod post_processing;
 pub mod render;
 pub mod resource;
+pub mod texture;

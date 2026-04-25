@@ -2,13 +2,11 @@ use indexmap::IndexMap;
 use slotmap::new_key_type;
 use wgpu::{BindGroupLayout, Device, PipelineLayout, RenderPipeline, ShaderModule, TextureFormat};
 
-use crate::entity::{
-    core::{
-        buffer::Buffer,
-        geometry::VertexBufferLayoutOwned,
-        render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
-        resource::GpuBindable,
-    },
+use crate::core::{
+    buffer::Buffer,
+    geometry::VertexBufferLayoutOwned,
+    render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
+    resource::GpuBindable,
     texture::Texture,
 };
 
