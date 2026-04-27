@@ -5,7 +5,7 @@ use cgmath::{Vector2, vec2};
 use crate::systems::animation::Interpolation;
 
 // synth.rs
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum AudioState {
     Playing,
     Stopping,
