@@ -1,8 +1,4 @@
-use heapless::{
-    spsc::{Consumer, Producer, Queue},
-    vec,
-};
-use image::imageops::sample_nearest;
+use heapless::spsc::{Consumer, Producer, Queue};
 
 use std::collections::HashMap;
 
@@ -116,7 +112,7 @@ impl AudioHandler {
 
         let stream = device
             .build_output_stream(
-                &config.into(),
+                config.clone(),
                 move |data: &mut [f32], _| {
                     process_audio_commands(
                         &mut audio_engine.consumer,
@@ -296,7 +292,7 @@ pub fn get_full_piano() -> Vec<Sound> {
                 length: 1.98,
             },
             EnvelopeSegment {
-                length: 0.1,
+                length: 0.01,
                 ..Default::default()
             },
         ));

@@ -79,6 +79,7 @@ impl State {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: None,
                 force_fallback_adapter: false,
+                ..Default::default()
             })
             .await;
 
@@ -107,6 +108,7 @@ impl State {
                         power_preference: wgpu::PowerPreference::default(),
                         compatible_surface: Some(&gl_surface),
                         force_fallback_adapter: false,
+                        ..Default::default()
                     })
                     .await
                     .expect("WebGL also unavailable!");
@@ -182,7 +184,7 @@ impl State {
             gpu_objects: GpuObjects::new(),
             post_processing,
         };
-        let egui_renderer = EguiRenderer::new(&device, surface_format, None, 1, &window);
+        let egui_renderer = EguiRenderer::new(&device, surface_format, 1, &window);
         let arguments = Arguments {
             args: HashMap::new(),
         };
@@ -317,7 +319,6 @@ impl State {
     }
 
     pub fn render(&mut self, dt: std::time::Duration, game: &mut Box<dyn Game>) {
-        // println!("FRAME");
         if !self.surface_configured {
             return;
         }
@@ -527,6 +528,7 @@ impl State {
                         }
                     }
                 }
+
                 surface_texture.present();
             }
             CurrentSurfaceTexture::Suboptimal(_) => (),

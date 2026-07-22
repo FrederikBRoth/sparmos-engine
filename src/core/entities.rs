@@ -76,18 +76,4 @@ impl World {
 
         f(&mut self.resources, query);
     }
-
-    // pub fn with_first_renderable<F>(&mut self, f: F)
-    // where
-    //     F: FnOnce(&mut Self, MaterialHandle),
-    // {
-    //     let handle = {
-    //         let mut query = self.world.query::<(&Renderable, &mut AnimationHandler)>();
-    //         query.iter().next().map(|(r, _)| r.material_handle.clone())
-    //     };
-    //
-    //     if let Some(handle) = handle {
-    //         f(self, handle);
-    //     }
-    // }
 }

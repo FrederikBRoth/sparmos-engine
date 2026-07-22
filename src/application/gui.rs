@@ -19,7 +19,6 @@ impl EguiRenderer {
     pub fn new(
         device: &Device,
         output_color_format: TextureFormat,
-        output_depth_format: Option<TextureFormat>,
         msaa_samples: u32,
         window: &Window,
     ) -> EguiRenderer {
@@ -35,7 +34,7 @@ impl EguiRenderer {
         );
         let render_options = RendererOptions {
             msaa_samples,
-            depth_stencil_format: output_depth_format,
+            depth_stencil_format: None,
             dithering: true,
             predictable_texture_filtering: true,
         };
