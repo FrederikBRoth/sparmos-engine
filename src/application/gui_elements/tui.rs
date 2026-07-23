@@ -1,4 +1,4 @@
-use egui::{InnerResponse, Panel, Ui};
+use egui::{Color32, InnerResponse, Panel, Ui};
 
 pub fn tui_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let display = format!("  {}", text);
@@ -92,39 +92,64 @@ impl TuiPanel {
         Self::new(
             egui::Panel::top("top_panel")
                 .resizable(false)
-                .show_separator_line(false),
+                .show_separator_line(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE),
+                ),
             border_type,
         )
     }
     pub fn bottom(border_type: TuiBorder) -> Self {
         Self::new(
-            egui::Panel::bottom("top_panel")
+            egui::Panel::bottom("bottom_panel")
                 .resizable(false)
-                .show_separator_line(false),
+                .show_separator_line(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE),
+                ),
             border_type,
         )
     }
 
     pub fn right(border_type: TuiBorder) -> Self {
         Self::new(
-            egui::Panel::right("top_panel")
+            egui::Panel::right("right_panel")
                 .resizable(false)
-                .show_separator_line(false),
+                .show_separator_line(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE),
+                ),
             border_type,
         )
     }
     pub fn left(border_type: TuiBorder) -> Self {
         Self::new(
-            egui::Panel::left("top_panel")
+            egui::Panel::left("left_panel")
                 .resizable(false)
-                .show_separator_line(false),
+                .show_separator_line(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE),
+                ),
             border_type,
         )
     }
 
-    pub fn size(mut self, size: u32) -> Self {
-        let size = 16.0 * (size + 3) as f32;
-        self.panel = self.panel.min_size(size);
+    pub fn size(mut self, ui: &egui::Ui, cols: u32) -> Self {
+        let (_, height) = ui.fonts_mut(|fonts| {
+            let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+            let galley = fonts.layout_no_wrap("F".into(), font_id, ui.visuals().text_color());
+
+            (galley.size().x, galley.size().y)
+        });
+        self.panel = self.panel.min_size((height * (cols + 3) as f32));
         self
     }
 
@@ -135,9 +160,9 @@ impl TuiPanel {
     pub fn show<R>(self, ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
         self.panel.show(ui, |ui| {
             let painter = ui.painter();
-            let right_left_margin = 10.0;
 
-            let font = egui::FontId::new(16.0, egui::FontFamily::Monospace);
+            let font = ui.style().text_styles[&egui::TextStyle::Body].clone();
+
             let color = egui::Color32::LIGHT_GRAY;
 
             let rect = ui.max_rect();
@@ -147,10 +172,15 @@ impl TuiPanel {
             let cell_w = galley.size().x;
             let cell_h = galley.size().y;
 
-            let cols = (rect.width() / cell_w).floor() as usize;
-            let rows = (rect.height() / cell_h).floor() as usize;
+            let cols_float = rect.width() / cell_w;
+            let rows_float = rect.height() / cell_h;
+            let cols_mod = cols_float % 1.0;
+            let rows_mod = rows_float % 1.0;
+            let cols = cols_float.floor() as usize;
+            let rows = rows_float.floor() as usize;
 
             let top = format!("┌{}┐", "─".repeat(cols.saturating_sub(2)));
+
             painter.text(
                 rect.left_top(),
                 egui::Align2::LEFT_TOP,
@@ -183,16 +213,25 @@ impl TuiPanel {
                 color,
             );
 
-            let inner = egui::Rect::from_min_max(
+            let background = egui::Rect::from_min_max(
+                egui::pos2(rect.left() + cell_w / 2.0, rect.top() + cell_w),
                 egui::pos2(
-                    rect.left() + cell_w + right_left_margin,
-                    rect.top() + cell_h,
-                ),
-                egui::pos2(
-                    rect.right() - cell_w - right_left_margin,
-                    rect.bottom() - cell_h,
+                    rect.right() - (cell_w * cols_mod) - (cell_w / 2.0),
+                    rect.bottom() - (cell_h * rows_mod) - cell_w,
                 ),
             );
+
+            painter.rect_filled(background, 0.0, Color32::BLACK);
+
+            let inner = egui::Rect::from_min_max(
+                egui::pos2(rect.left() + cell_w * 2.0, rect.top() + cell_w * 2.0),
+                egui::pos2(
+                    rect.right() - (cell_w * cols_mod) - cell_w * 2.0,
+                    rect.bottom() - (cell_h * rows_mod) - cell_w * 2.0,
+                ),
+            );
+
+            // painter.rect_filled(inner, 0.0, Color32::LIGHT_GRAY);
 
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
 
