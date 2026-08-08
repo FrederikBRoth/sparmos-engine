@@ -6,8 +6,9 @@ use wgpu::ShaderModule;
 use crate::{
     application::state::DeviceBackend,
     core::{
-        engine::Engine, entities::World, geometry::Mesh, instance::InstanceControllerTrait,
-        material::Material, post_processing::PostProcessHandler, texture::TextureSampleView,
+        compute::Compute, engine::Engine, entities::World, geometry::Mesh,
+        instance::InstanceControllerTrait, material::Material, post_processing::PostProcessHandler,
+        texture::TextureSampleView,
     },
 };
 
@@ -84,11 +85,13 @@ pub trait DrawMesh {
 }
 new_key_type! { pub struct MeshHandle; }
 new_key_type! { pub struct MaterialHandle; }
+new_key_type! { pub struct ComputeHandle; }
 new_key_type! { pub struct InstanceControllerHandle; }
 
 pub struct GpuObjects {
     pub instance_controllers: SlotMap<InstanceControllerHandle, Box<dyn InstanceControllerTrait>>,
     pub materials: SlotMap<MaterialHandle, Material>,
+    pub computes: SlotMap<ComputeHandle, Compute>,
     pub meshes: SlotMap<MeshHandle, Mesh>,
 }
 
@@ -110,6 +113,7 @@ impl GpuObjects {
             instance_controllers: SlotMap::with_key(),
             materials: SlotMap::with_key(),
             meshes: SlotMap::with_key(),
+            computes: SlotMap::with_key(),
         }
     }
 }

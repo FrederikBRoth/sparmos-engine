@@ -1,7 +1,8 @@
 use cgmath::Vector3;
+use wgpu::ShaderStages;
 
 use crate::core::{
-    buffer::{Buffer, BufferType},
+    buffer::{Buffer, BufferType, UniformParameters},
     resource::{GpuBindable, System},
 };
 
@@ -62,7 +63,11 @@ pub struct LightSystem {
 impl LightSystem {
     pub fn init(lights: &[Light], device: &wgpu::Device) -> Self {
         let light_block = Light::to_raw_list(lights);
-        let storage_buffer = Buffer::new_layout(&[light_block], device, &BufferType::UniformBuffer);
+        let storage_buffer = Buffer::new_layout(
+            &[light_block],
+            device,
+            &BufferType::UniformBuffer(UniformParameters::default()),
+        );
         Self { storage_buffer }
     }
 }

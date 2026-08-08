@@ -1,4 +1,5 @@
 pub mod buffer;
+pub mod compute;
 pub mod engine;
 pub mod entities;
 pub mod geometry;

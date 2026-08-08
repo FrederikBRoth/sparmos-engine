@@ -13,7 +13,7 @@ where
     T: InstanceToRaw + bytemuck::Pod + Send + Sync + 'static,
 {
     pub instances: Arc<RwLock<Vec<Instance>>>,
-    pub pending: Arc<Mutex<Vec<T>>>, // ✅ NO Option, NO realloc
+    pub pending: Arc<Mutex<Vec<T>>>,
     pub offset: usize,
     pub atomic_usize: Arc<AtomicUsize>,
     pub buffer_layout: VertexBufferLayoutOwned,

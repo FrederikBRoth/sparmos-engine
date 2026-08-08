@@ -5,16 +5,17 @@ use std::vec;
 
 #[cfg(feature = "gui")]
 use egui::Ui;
-use wgpu::{CurrentSurfaceTexture, InstanceDescriptor};
+use wgpu::{ComputePipeline, CurrentSurfaceTexture, InstanceDescriptor};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
 use crate::application::gui::EguiRenderer;
+use crate::core::compute::ComputeObject;
 use crate::core::engine::{Arguments, Engine, RenderCommands};
 use crate::core::entities::World;
 use crate::core::post_processing::PostProcessHandler;
-use crate::core::render::{DrawMesh, GpuObjects, RenderContext, Renderable};
+use crate::core::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext, Renderable};
 use crate::core::resource::Resources;
 use crate::core::texture::Texture;
 use crate::systems::animation::AnimationHandler;
@@ -486,6 +487,31 @@ impl State {
                             });
 
                         render_pass.draw_scene(&self.backend, &self.engine, &self.world);
+                    }
+                }
+
+                {
+                    let mut pass = encoder.begin_compute_pass(&Default::default());
+
+                    let scene = &self.engine.render_context.gpu_objects;
+                    for (compute) in self.world.entities.query::<&ComputeHandle>().iter() {
+                        println!("COMPUTE SHADER RUNNING");
+
+                        let data = [2, 5, 1, 2, 3, 4, 6, 8];
+                        let num_dispatches = data.len().div_ceil(64) as u32;
+                        let compute_pipeline = scene.computes.get(*compute).unwrap();
+                        pass.set_pipeline(&compute_pipeline.pipeline);
+                        pass.set_bind_group(
+                            0,
+                            compute_pipeline.input_buffer.bind_group.as_ref().unwrap(),
+                            &[],
+                        );
+                        pass.set_bind_group(
+                            1,
+                            compute_pipeline.output_buffer.bind_group.as_ref().unwrap(),
+                            &[],
+                        );
+                        pass.dispatch_workgroups(num_dispatches, 1, 1);
                     }
                 }
 
