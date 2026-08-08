@@ -2,7 +2,7 @@ use std::fmt::format;
 
 use egui::{
     Area, Color32, CursorIcon, Id, InnerResponse, Order, Panel, Pos2, Rect, Response, Sense, Ui,
-    UiBuilder, Vec2, Window, pos2,
+    UiBuilder, Vec2, Window, pos2, vec2,
 };
 
 pub fn tui_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
@@ -33,8 +33,8 @@ pub fn tui_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let text = format!("{} {}", prefix, text);
 
     ui.painter().text(
-        rect.left_top(),
-        egui::Align2::LEFT_TOP,
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
         text,
         ui.style().text_styles[&egui::TextStyle::Button].clone(),
         color,
@@ -52,8 +52,10 @@ pub fn toggleable_tui_button(ui: &mut egui::Ui, state: &mut bool, text: &str) ->
         ui.visuals().widgets.inactive.fg_stroke.color,
     );
 
-    let (rect, mut response) =
-        ui.allocate_exact_size(galley.size() + egui::vec2(8.0, 4.0), egui::Sense::click());
+    let (rect, mut response) = ui.allocate_exact_size(
+        galley.size() + vec2(galley.size().x * 0.1, galley.size().y),
+        egui::Sense::click(),
+    );
 
     if response.clicked() {
         *state = !*state;
@@ -120,7 +122,7 @@ impl TuiWindow {
                 ui.set_min_size(state.size);
                 ui.set_max_size(state.size);
 
-                let (inner, outer, _) = draw_tui_border(ui, Some(self.title.clone()));
+                let (inner, outer, _) = draw_tui_border(ui, Some(self.title.clone()), 1.0);
 
                 const EDGE: f32 = 8.0;
                 const HALF_EDGE: f32 = EDGE * 0.5;
@@ -177,7 +179,6 @@ impl TuiWindow {
                 }
 
                 if top.dragged() {
-                    println!("dragging!");
                     state.pos += top.drag_delta();
                 }
 
@@ -273,7 +274,7 @@ impl TuiPanel {
 
     pub fn show<R>(self, ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
         self.panel.show(ui, |ui| {
-            let (inner, outer, _sense) = draw_tui_border(ui, None);
+            let (inner, outer, _sense) = draw_tui_border(ui, None, 0.0);
             // painter.rect_filled(inner, 0.0, Color32::LIGHT_GRAY);
 
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
@@ -283,7 +284,7 @@ impl TuiPanel {
     }
 }
 
-fn draw_tui_border(ui: &mut Ui, title: Option<String>) -> (Rect, Rect, Response) {
+fn draw_tui_border(ui: &mut Ui, title: Option<String>, top_margin: f32) -> (Rect, Rect, Response) {
     let painter = ui.painter();
 
     let font = ui.style().text_styles[&egui::TextStyle::Body].clone();
@@ -316,6 +317,7 @@ fn draw_tui_border(ui: &mut Ui, title: Option<String>) -> (Rect, Rect, Response)
 
     painter.rect_filled(background, 0.0, Color32::BLACK);
     let prefix = if let Some(title) = title {
+        let title = format!(" {} ", title);
         format!("┌{}{}", "─".repeat(left_margin.saturating_sub(2)), title)
     } else {
         format!("┌{}", "─".repeat(left_margin.saturating_sub(2)))
@@ -358,7 +360,10 @@ fn draw_tui_border(ui: &mut Ui, title: Option<String>) -> (Rect, Rect, Response)
     );
 
     let inner = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + cell_w * 2.0, rect.top() + cell_w * 2.0),
+        egui::pos2(
+            rect.left() + cell_w * 2.0,
+            rect.top() + cell_w * (2.0 + top_margin),
+        ),
         egui::pos2(
             rect.right() - (cell_w * cols_mod) - cell_w * 2.0,
             rect.bottom() - (cell_h * rows_mod) - cell_w * 2.0,
