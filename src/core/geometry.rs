@@ -10,12 +10,12 @@ pub struct VertexBufferLayoutOwned {
 }
 
 impl VertexBufferLayoutOwned {
-    pub fn to_wgpu<'a>(&'a self) -> wgpu::VertexBufferLayout<'a> {
-        wgpu::VertexBufferLayout {
+    pub fn to_wgpu<'a>(&'a self) -> Option<wgpu::VertexBufferLayout<'a>> {
+        Some(wgpu::VertexBufferLayout {
             array_stride: self.array_stride,
             step_mode: self.step_mode,
             attributes: &self.attributes,
-        }
+        })
     }
 }
 

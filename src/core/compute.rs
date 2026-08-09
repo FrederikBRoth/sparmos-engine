@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use indexmap::IndexMap;
+use tokio::sync::mpsc::channel;
 use wgpu::{BindGroupLayout, ComputePipeline, RenderPipeline};
 
 use crate::core::{
@@ -12,6 +15,7 @@ pub struct Compute {
     pub input_buffer: Buffer,
     pub output_buffer: Buffer,
     pub temp_buffer: wgpu::Buffer,
+    pub length: u32,
 }
 
 //marker struct for ECS
@@ -24,6 +28,7 @@ impl Compute {
         input_buffer: Buffer,
         output_buffer: Buffer,
         shader: &str,
+        length: usize,
     ) -> ComputeHandle {
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
         bind_group_layouts.push(Some(&input_buffer.bind_group_layout));
@@ -64,7 +69,12 @@ impl Compute {
             input_buffer: input_buffer,
             output_buffer: output_buffer,
             temp_buffer,
+            length: length as u32,
         };
         render_context.gpu_objects.computes.insert(material)
     }
 }
+
+struct ComputeSystem {}
+
+impl ComputeSystem {}

@@ -2,16 +2,20 @@ use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
     event::*,
-    event_loop::ActiveEventLoop,
+    event_loop::{ActiveEventLoop, EventLoopProxy},
     window::{Window, WindowId},
 };
 
-use crate::application::state::{Game, State};
+use crate::{
+    application::state::{Game, State},
+    core::render::ComputeHandle,
+};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 pub enum EngineEvent {
-    StateReady { state: State, game: Box<dyn Game> },
+    EngineReady,
+    ComputeResult(Vec<u32>),
 }
 
 pub enum UserEvent<U> {
@@ -27,10 +31,13 @@ where
     pub is_focused: bool,
     pub hooks: Box<dyn AppLifecycle<U>>,
     pub game_loop: Option<Box<dyn Game>>,
-    #[cfg(target_arch = "wasm32")]
-    proxy: Option<winit::event_loop::EventLoopProxy<UserEvent<U>>>,
-    state: Option<State>,
+    pub state: Option<State>,
+    proxy: Option<EventLoopProxy<UserEvent<U>>>,
     last_time: web_time::Instant,
+    readback_pending: bool,
+
+    #[cfg(target_arch = "wasm32")]
+    pending: std::rc::Rc<std::cell::RefCell<Option<(State, Box<dyn Game>)>>>,
 }
 
 impl<U> App<U>
@@ -38,40 +45,36 @@ where
     U: 'static,
 {
     pub fn new<G>(
-        #[cfg(target_arch = "wasm32")] event_loop: &winit::event_loop::EventLoop<UserEvent<U>>,
+        event_loop: &winit::event_loop::EventLoop<UserEvent<U>>,
         hooks: G,
         game_loop: impl Game + 'static,
     ) -> Self
     where
         G: AppLifecycle<U> + 'static,
     {
-        #[cfg(target_arch = "wasm32")]
-        let proxy = Some(event_loop.create_proxy());
-
         Self {
             is_focused: true,
             state: None,
-            hooks: Box::new(hooks), // ← boxed lifecycle
+            hooks: Box::new(hooks),
             game_loop: Some(Box::new(game_loop)),
-            #[cfg(target_arch = "wasm32")]
-            proxy,
+            proxy: Some(event_loop.create_proxy()),
             last_time: web_time::Instant::now(),
+            readback_pending: false,
+            #[cfg(target_arch = "wasm32")]
+            pending: std::rc::Rc::new(std::cell::RefCell::new(None)),
         }
     }
 }
 
 pub trait AppLifecycle<U>: 'static {
-    #[cfg(target_arch = "wasm32")]
     fn on_resumed(&mut self, _event_loop: &winit::event_loop::EventLoopProxy<UserEvent<U>>) {}
-    #[cfg(not(target_arch = "wasm32"))]
-    fn on_resumed(&mut self);
     fn on_user_event(&mut self, proxy: &mut State, _event: U);
     fn on_device_event(&mut self, event: DeviceEvent, proxy: &mut State);
 }
 
-impl<U: 'static> ApplicationHandler<UserEvent<U>> for App<U>
+impl<U: Send + 'static> ApplicationHandler<UserEvent<U>> for App<U>
 where
-    U: 'static,
+    U: Send + 'static,
 {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[allow(unused_mut)]
@@ -94,31 +97,28 @@ where
 
         #[cfg(target_arch = "wasm32")]
         {
-            let proxy = self.proxy.take().unwrap();
+            let proxy = self.proxy.clone().unwrap();
             let mut game = self.game_loop.take().unwrap();
 
-            let value = proxy.clone();
+            let pending = self.pending.clone();
+
             wasm_bindgen_futures::spawn_local(async move {
                 let mut state = State::new(window.clone()).await;
 
                 game.setup(&mut state);
 
                 let size = state.window().inner_size();
+
                 if size.width > 0 && size.height > 0 {
                     state.resize(size);
                 }
 
-                state.window().request_redraw();
+                *pending.borrow_mut() = Some((state, game));
 
-                let _ = value
-                    .send_event(UserEvent::EngineEvent(EngineEvent::StateReady {
-                        state,
-                        game,
-                    }))
-                    .is_ok();
+                let _ = proxy.send_event(UserEvent::EngineEvent(EngineEvent::EngineReady));
             });
 
-            self.hooks.on_resumed(&proxy);
+            self.hooks.on_resumed(&self.proxy.clone().unwrap());
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -134,36 +134,56 @@ where
                 self.game_loop = Some(game_loop);
             }
 
-            self.hooks.on_resumed();
+            let proxy = self.proxy.clone().unwrap();
+            self.hooks.on_resumed(&proxy);
         }
     }
 
     #[allow(unused_mut)]
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent<U>) {
         match event {
-            UserEvent::EngineEvent(engine_event) => match engine_event {
-                EngineEvent::StateReady {
-                    mut state,
-                    mut game,
-                } => {
-                    self.last_time = web_time::Instant::now();
+            UserEvent::EngineEvent(engine_event) => {
+                match engine_event {
+                    EngineEvent::EngineReady => {
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let (mut state, mut game) = self.pending.borrow_mut().take().expect(
+                                "Received EngineReady \
+                                         without pending engine",
+                            );
 
-                    let size = state.window().inner_size();
+                            self.last_time = web_time::Instant::now();
 
-                    log::warn!("{:?}", size);
-                    state.resize(size);
-                    game.resize(&mut state.engine, &mut state.world);
+                            let size = state.window().inner_size();
 
-                    state.window().request_redraw();
+                            state.resize(size);
+                            game.resize(&mut state.engine, &mut state.world);
 
-                    self.state = Some(state);
-                    self.game_loop = Some(game);
+                            state.window().request_redraw();
+
+                            self.state = Some(state);
+                            self.game_loop = Some(game);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            // Nothing to do.
+                        }
+                    }
+
+                    EngineEvent::ComputeResult(items) => {
+                        self.readback_pending = false;
+
+                        // for item in items.iter() {
+                        //     println!("yo: {}", item)
+                        // }
+                    }
                 }
-            },
+            }
 
             UserEvent::Custom(user_event) => {
-                self.hooks
-                    .on_user_event(self.state.as_mut().unwrap(), user_event);
+                if let Some(state) = self.state.as_mut() {
+                    self.hooks.on_user_event(state, user_event);
+                }
             }
         }
     }
@@ -182,7 +202,9 @@ where
                 self.last_time = web_time::Instant::now();
                 let dt = self.last_time.elapsed();
 
-                state.render(dt, game);
+                if let Some((encoder, st)) = state.start_render(dt, game, self.readback_pending) {
+                    state.finish_render(encoder, st);
+                }
             }
         }
 
@@ -204,7 +226,22 @@ where
             WindowEvent::RedrawRequested => {
                 let dt = self.last_time.elapsed();
                 self.last_time = web_time::Instant::now();
-                state.render(dt, game);
+                if let Some((encoder, st)) = state.start_render(dt, game, self.readback_pending) {
+                    state.finish_render(encoder, st);
+
+                    let scene = &state.engine.render_context.gpu_objects;
+
+                    for compute in state.world.entities.query::<&ComputeHandle>().iter() {
+                        let compute_pipeline = scene.computes.get(*compute).unwrap();
+
+                        readback(
+                            &state.engine.render_context.device,
+                            &compute_pipeline.temp_buffer,
+                            &self.proxy.clone().unwrap(),
+                            &mut self.readback_pending,
+                        );
+                    }
+                }
 
                 state.update(dt);
 
@@ -229,7 +266,44 @@ where
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        self.hooks
-            .on_device_event(event, self.state.as_mut().unwrap());
+        if let Some(state) = self.state.as_mut() {
+            self.hooks.on_device_event(event, state);
+        }
     }
+}
+
+pub fn readback<U: Send + 'static>(
+    device: &wgpu::Device,
+    buffer: &wgpu::Buffer,
+    proxy: &EventLoopProxy<UserEvent<U>>,
+    pending: &mut bool,
+) {
+    let slice = buffer.slice(..);
+    let buffer = buffer.clone();
+    let proxy = proxy.clone();
+
+    if !*pending {
+        *pending = true;
+        slice.map_async(wgpu::MapMode::Read, move |result| match result {
+            Ok(()) => {
+                let slice = buffer.slice(..);
+                let data = slice.get_mapped_range();
+
+                let result = bytemuck::cast_slice::<u8, u32>(&data.unwrap())
+                    .clone()
+                    .to_vec();
+
+                buffer.unmap();
+
+                let _ =
+                    proxy.send_event(UserEvent::EngineEvent(EngineEvent::ComputeResult(result)));
+            }
+
+            Err(err) => {
+                log::error!("GPU mapping failed: {err:?}");
+            }
+        });
+    }
+
+    device.poll(wgpu::PollType::Poll).ok();
 }

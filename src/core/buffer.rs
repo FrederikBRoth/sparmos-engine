@@ -104,7 +104,7 @@ impl Buffer {
             BufferType::StorageBuffer(params) => {
                 let storage_buffer = if params.init {
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Storage"),
+                        label: Some("input"),
                         contents: bytemuck::cast_slice(instances),
                         // usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                         usage: params.usage,

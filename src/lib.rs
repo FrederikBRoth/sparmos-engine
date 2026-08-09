@@ -40,11 +40,7 @@ pub mod prelude {
             .build()
             .unwrap();
 
-        #[cfg(target_arch = "wasm32")]
         let mut app = App::new(&event_loop, hooks, gameloop);
-
-        #[cfg(not(target_arch = "wasm32"))]
-        let mut app = App::new(hooks, gameloop);
 
         event_loop.run_app(&mut app).unwrap();
         Ok(())
