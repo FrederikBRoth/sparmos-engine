@@ -1,3 +1,5 @@
+use std::any::TypeId;
+
 use cgmath::{
     EuclideanSpace, InnerSpace, Point3, Quaternion, Rad, Rotation, Rotation3, SquareMatrix,
     Vector3, Vector4,
@@ -594,9 +596,6 @@ impl GpuBindable for CameraSystem {
     fn get_bind_group_layout(&self) -> &BindGroupLayout {
         &self.camera_bind_group_layout
     }
-}
-
-impl System for CameraSystem {
     fn make_bind_group(&self, device: &wgpu::Device) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &self.camera_bind_group_layout,
@@ -607,8 +606,20 @@ impl System for CameraSystem {
             label: Some("camera_bind_group"),
         })
     }
+}
 
+impl System for CameraSystem {
     fn get_system_name(&self) -> String {
         "Camera System".to_string()
+    }
+
+    fn register(self, resources: &mut crate::core::resource::Resources, device: &wgpu::Device) {
+        let type_id = TypeId::of::<Self>();
+
+        resources
+            .bind_groups
+            .insert(type_id, self.make_bind_group(device));
+
+        resources.resource_map.insert(type_id, Box::new(self));
     }
 }

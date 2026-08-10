@@ -1,9 +1,11 @@
+use std::any::TypeId;
+
 use cgmath::Vector3;
 use wgpu::ShaderStages;
 
 use crate::core::{
     buffer::{Buffer, BufferType, UniformParameters},
-    resource::{GpuBindable, System},
+    resource::{GpuBindable, Register, Resources, System},
 };
 
 const MAX_LIGHTS: usize = 16;
@@ -76,9 +78,6 @@ impl GpuBindable for LightSystem {
     fn get_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.storage_buffer.bind_group_layout
     }
-}
-
-impl System for LightSystem {
     fn make_bind_group(&self, device: &wgpu::Device) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &self.storage_buffer.bind_group_layout,
@@ -89,8 +88,20 @@ impl System for LightSystem {
             label: Some("Quad Color Bind Group"),
         })
     }
+}
 
+impl System for LightSystem {
     fn get_system_name(&self) -> String {
         "Light System".to_string()
+    }
+
+    fn register(self, resources: &mut Resources, device: &wgpu::Device) {
+        let type_id = TypeId::of::<Self>();
+
+        resources
+            .bind_groups
+            .insert(type_id, self.make_bind_group(device));
+
+        resources.resource_map.insert(type_id, Box::new(self));
     }
 }

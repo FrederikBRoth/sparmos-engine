@@ -6,10 +6,10 @@ use wgpu::ShaderModule;
 use crate::{
     application::state::DeviceBackend,
     core::{
-        compute::Compute, engine::Engine, entities::World, geometry::Mesh,
-        instance::InstanceControllerTrait, material::Material, post_processing::PostProcessHandler,
-        texture::TextureSampleView,
+        engine::Engine, entities::World, geometry::Mesh, instance::InstanceControllerTrait,
+        material::Material, post_processing::PostProcessHandler, texture::TextureSampleView,
     },
+    systems::compute::Compute,
 };
 
 pub struct RenderContext {
@@ -91,7 +91,6 @@ new_key_type! { pub struct InstanceControllerHandle; }
 pub struct GpuObjects {
     pub instance_controllers: SlotMap<InstanceControllerHandle, Box<dyn InstanceControllerTrait>>,
     pub materials: SlotMap<MaterialHandle, Material>,
-    pub computes: SlotMap<ComputeHandle, Compute>,
     pub meshes: SlotMap<MeshHandle, Mesh>,
 }
 
@@ -113,15 +112,6 @@ impl GpuObjects {
             instance_controllers: SlotMap::with_key(),
             materials: SlotMap::with_key(),
             meshes: SlotMap::with_key(),
-            computes: SlotMap::with_key(),
         }
     }
 }
-//The two structs below might look identical, but the render item is useful for the render pipeline
-//iterating through refences is faster if we need multi pass rendering for shados etc.
-//
-// pub struct RenderItem<'a> {
-//     mesh: &'a Mesh,
-//     instance_controller: &'a Box<dyn InstanceControllerTrait>,
-//     material: &'a Material,
-// }

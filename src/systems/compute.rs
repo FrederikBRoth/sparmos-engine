@@ -1,16 +1,19 @@
-use std::sync::Arc;
+use std::{any::TypeId, sync::Arc};
 
 use indexmap::IndexMap;
+use slotmap::SlotMap;
 use tokio::sync::mpsc::channel;
 use wgpu::{BindGroupLayout, ComputePipeline, RenderPipeline};
 
 use crate::core::{
     buffer::Buffer,
     render::{ComputeHandle, RenderContext},
+    resource::System,
 };
 
 #[derive(Clone)]
 pub struct Compute {
+    pub pending: bool,
     pub pipeline: ComputePipeline,
     pub input_buffer: Buffer,
     pub output_buffer: Buffer,
@@ -29,7 +32,7 @@ impl Compute {
         output_buffer: Buffer,
         shader: &str,
         length: usize,
-    ) -> ComputeHandle {
+    ) -> Compute {
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
         bind_group_layouts.push(Some(&input_buffer.bind_group_layout));
         bind_group_layouts.push(Some(&output_buffer.bind_group_layout));
@@ -64,17 +67,53 @@ impl Compute {
                     compilation_options: Default::default(),
                     cache: Default::default(),
                 });
-        let material = Compute {
+        let compute = Compute {
+            pending: false,
             pipeline,
             input_buffer: input_buffer,
             output_buffer: output_buffer,
             temp_buffer,
             length: length as u32,
         };
-        render_context.gpu_objects.computes.insert(material)
+        compute
     }
 }
 
-struct ComputeSystem {}
+pub struct ComputeSystem {
+    computes: SlotMap<ComputeHandle, Compute>,
+}
 
-impl ComputeSystem {}
+impl ComputeSystem {
+    pub fn get(&mut self, handle: ComputeHandle) -> Option<&mut Compute> {
+        self.computes.get_mut(handle)
+    }
+
+    pub fn add(
+        &mut self,
+        render_context: &mut RenderContext,
+        input_buffer: Buffer,
+        output_buffer: Buffer,
+        shader: &str,
+        length: usize,
+    ) -> ComputeHandle {
+        let compute = Compute::new(render_context, input_buffer, output_buffer, shader, length);
+        self.computes.insert(compute)
+    }
+
+    pub fn new() -> Self {
+        Self {
+            computes: SlotMap::with_key(),
+        }
+    }
+}
+
+impl System for ComputeSystem {
+    fn get_system_name(&self) -> String {
+        todo!()
+    }
+
+    fn register(self, resources: &mut crate::core::resource::Resources, _device: &wgpu::Device) {
+        let type_id = TypeId::of::<Self>();
+        resources.resource_map.insert(type_id, Box::new(self));
+    }
+}

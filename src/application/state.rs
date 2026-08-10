@@ -15,7 +15,6 @@ use winit::window::Window;
 
 use crate::application::event_loop::readback;
 use crate::application::gui::EguiRenderer;
-use crate::core::compute::ComputeObject;
 use crate::core::engine::{Arguments, Engine, RenderCommands};
 use crate::core::entities::World;
 use crate::core::post_processing::PostProcessHandler;
@@ -24,6 +23,7 @@ use crate::core::resource::Resources;
 use crate::core::texture::Texture;
 use crate::systems::animation::AnimationHandler;
 use crate::systems::camera::{Camera, CameraAnimator, CameraSystem};
+use crate::systems::compute::ComputeSystem;
 
 pub enum DeviceBackend {
     WebGL,
@@ -324,14 +324,9 @@ impl State {
             );
     }
 
-    pub fn start_render(
-        &mut self,
-        dt: std::time::Duration,
-        game: &mut Box<dyn Game>,
-        pending: bool,
-    ) -> Option<(CommandEncoder, SurfaceTexture)> {
+    pub fn render(&mut self, dt: std::time::Duration, game: &mut Box<dyn Game>) {
         if !self.surface_configured {
-            return None;
+            return;
         }
 
         self.window.request_redraw();
@@ -538,65 +533,64 @@ impl State {
                     //         // &self.proxy.clone().unwrap(),
                     //     );
                     // }
-                    if !pending {
-                        for (compute) in self.world.entities.query::<&ComputeHandle>().iter() {
-                            let compute_pipeline = scene.computes.get(*compute).unwrap();
-                            let num_dispatches = compute_pipeline.length.div_ceil(64) as u32;
+                    let computes = self.world.resources.get_system_mut::<ComputeSystem>();
 
-                            {
-                                let mut pass = encoder.begin_compute_pass(&Default::default());
-
-                                pass.set_pipeline(&compute_pipeline.pipeline);
-                                pass.set_bind_group(
-                                    0,
-                                    compute_pipeline.input_buffer.bind_group.as_ref().unwrap(),
-                                    &[],
-                                );
-                                pass.set_bind_group(
-                                    1,
-                                    compute_pipeline.output_buffer.bind_group.as_ref().unwrap(),
-                                    &[],
-                                );
-                                pass.dispatch_workgroups(num_dispatches, 1, 1);
-                            }
-                            encoder.copy_buffer_to_buffer(
-                                &compute_pipeline.output_buffer.buffer,
-                                0,
-                                &compute_pipeline.temp_buffer,
-                                0,
-                                compute_pipeline.output_buffer.buffer.size(),
-                            );
-                            compute_started = true;
+                    for (compute) in self.world.entities.query::<&ComputeHandle>().iter() {
+                        let compute_pipeline = computes.get(*compute).unwrap();
+                        if compute_pipeline.pending {
+                            continue;
                         }
+                        let num_dispatches = compute_pipeline.length.div_ceil(64) as u32;
+
+                        {
+                            let mut pass = encoder.begin_compute_pass(&Default::default());
+
+                            pass.set_pipeline(&compute_pipeline.pipeline);
+                            pass.set_bind_group(
+                                0,
+                                compute_pipeline.input_buffer.bind_group.as_ref().unwrap(),
+                                &[],
+                            );
+                            pass.set_bind_group(
+                                1,
+                                compute_pipeline.output_buffer.bind_group.as_ref().unwrap(),
+                                &[],
+                            );
+                            pass.dispatch_workgroups(num_dispatches, 1, 1);
+                        }
+                        encoder.copy_buffer_to_buffer(
+                            &compute_pipeline.output_buffer.buffer,
+                            0,
+                            &compute_pipeline.temp_buffer,
+                            0,
+                            compute_pipeline.output_buffer.buffer.size(),
+                        );
+                        compute_started = true;
                     }
                 }
 
-                Some((encoder, surface_texture))
-            }
-            CurrentSurfaceTexture::Suboptimal(_) => None,
-            CurrentSurfaceTexture::Timeout => None,
-            CurrentSurfaceTexture::Occluded => None,
-            CurrentSurfaceTexture::Outdated => None,
-            CurrentSurfaceTexture::Lost => None,
-            CurrentSurfaceTexture::Validation => None,
-        }
-    }
-    pub fn finish_render(&mut self, encoder: CommandEncoder, surface_texture: SurfaceTexture) {
-        self.engine
-            .render_context
-            .queue
-            .submit(std::iter::once(encoder.finish()));
+                self.engine
+                    .render_context
+                    .queue
+                    .submit(std::iter::once(encoder.finish()));
 
-        let mut commands = std::mem::take(&mut self.engine.render_commands);
-        for command in commands.drain(..) {
-            match command {
-                RenderCommands::ChangeShader(material_handle, shader) => {
-                    self.engine.change_shader_inner(&material_handle, &shader);
+                let mut commands = std::mem::take(&mut self.engine.render_commands);
+                for command in commands.drain(..) {
+                    match command {
+                        RenderCommands::ChangeShader(material_handle, shader) => {
+                            self.engine.change_shader_inner(&material_handle, &shader);
+                        }
+                    }
                 }
+                self.engine.render_context.queue.present(surface_texture);
             }
+            CurrentSurfaceTexture::Suboptimal(_) => (),
+            CurrentSurfaceTexture::Timeout => (),
+            CurrentSurfaceTexture::Occluded => (),
+            CurrentSurfaceTexture::Outdated => (),
+            CurrentSurfaceTexture::Lost => (),
+            CurrentSurfaceTexture::Validation => (),
         }
-
-        self.engine.render_context.queue.present(surface_texture);
     }
 }
 

@@ -9,13 +9,18 @@ use winit::{
 use crate::{
     application::state::{Game, State},
     core::render::ComputeHandle,
+    systems::compute::{Compute, ComputeSystem},
 };
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+pub struct ComputePackage {
+    data: Vec<u32>,
+    handle: ComputeHandle,
+}
 pub enum EngineEvent {
     EngineReady,
-    ComputeResult(Vec<u32>),
+    ComputeResult(ComputePackage),
 }
 
 pub enum UserEvent<U> {
@@ -170,10 +175,12 @@ where
                         }
                     }
 
-                    EngineEvent::ComputeResult(items) => {
-                        self.readback_pending = false;
-
-                        // for item in items.iter() {
+                    EngineEvent::ComputeResult(package) => {
+                        let state = self.state.as_mut().unwrap();
+                        let compute_system =
+                            state.world.resources.get_system_mut::<ComputeSystem>();
+                        compute_system.get(package.handle).unwrap().pending = false;
+                        // for item in package.data.iter() {
                         //     println!("yo: {}", item)
                         // }
                     }
@@ -202,9 +209,7 @@ where
                 self.last_time = web_time::Instant::now();
                 let dt = self.last_time.elapsed();
 
-                if let Some((encoder, st)) = state.start_render(dt, game, self.readback_pending) {
-                    state.finish_render(encoder, st);
-                }
+                state.render(dt, game)
             }
         }
 
@@ -226,22 +231,28 @@ where
             WindowEvent::RedrawRequested => {
                 let dt = self.last_time.elapsed();
                 self.last_time = web_time::Instant::now();
-                if let Some((encoder, st)) = state.start_render(dt, game, self.readback_pending) {
-                    state.finish_render(encoder, st);
 
-                    let scene = &state.engine.render_context.gpu_objects;
+                state.render(dt, game);
+                let computes = state.world.resources.get_system_mut::<ComputeSystem>();
 
-                    for compute in state.world.entities.query::<&ComputeHandle>().iter() {
-                        let compute_pipeline = scene.computes.get(*compute).unwrap();
+                for compute_handle in state.world.entities.query::<&ComputeHandle>().iter() {
+                    let compute = computes.get(*compute_handle).unwrap();
 
+                    if !compute.pending {
+                        compute.pending = true;
                         readback(
-                            &state.engine.render_context.device,
-                            &compute_pipeline.temp_buffer,
+                            &compute.temp_buffer,
+                            *compute_handle,
                             &self.proxy.clone().unwrap(),
-                            &mut self.readback_pending,
                         );
                     }
                 }
+                state
+                    .engine
+                    .render_context
+                    .device
+                    .poll(wgpu::PollType::Poll)
+                    .ok();
 
                 state.update(dt);
 
@@ -273,37 +284,34 @@ where
 }
 
 pub fn readback<U: Send + 'static>(
-    device: &wgpu::Device,
-    buffer: &wgpu::Buffer,
+    compute: &wgpu::Buffer,
+    handle: ComputeHandle,
     proxy: &EventLoopProxy<UserEvent<U>>,
-    pending: &mut bool,
 ) {
-    let slice = buffer.slice(..);
-    let buffer = buffer.clone();
+    let slice = compute.slice(..);
+    let buffer = compute.clone();
     let proxy = proxy.clone();
+    slice.map_async(wgpu::MapMode::Read, move |result| match result {
+        Ok(()) => {
+            let slice = buffer.slice(..);
+            let data = slice.get_mapped_range();
 
-    if !*pending {
-        *pending = true;
-        slice.map_async(wgpu::MapMode::Read, move |result| match result {
-            Ok(()) => {
-                let slice = buffer.slice(..);
-                let data = slice.get_mapped_range();
+            let result = bytemuck::cast_slice::<u8, u32>(&data.unwrap())
+                .clone()
+                .to_vec();
 
-                let result = bytemuck::cast_slice::<u8, u32>(&data.unwrap())
-                    .clone()
-                    .to_vec();
+            buffer.unmap();
 
-                buffer.unmap();
+            let _ = proxy.send_event(UserEvent::EngineEvent(EngineEvent::ComputeResult(
+                ComputePackage {
+                    data: result,
+                    handle: handle,
+                },
+            )));
+        }
 
-                let _ =
-                    proxy.send_event(UserEvent::EngineEvent(EngineEvent::ComputeResult(result)));
-            }
-
-            Err(err) => {
-                log::error!("GPU mapping failed: {err:?}");
-            }
-        });
-    }
-
-    device.poll(wgpu::PollType::Poll).ok();
+        Err(err) => {
+            log::error!("GPU mapping failed: {err:?}");
+        }
+    });
 }

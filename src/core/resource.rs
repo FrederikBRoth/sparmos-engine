@@ -8,17 +8,18 @@ use wgpu::{BindGroup, BindGroupLayout};
 
 pub trait GpuBindable {
     fn get_bind_group_layout(&self) -> &BindGroupLayout;
+    fn make_bind_group(&self, device: &wgpu::Device) -> BindGroup;
 }
 
 pub trait System {
-    fn make_bind_group(&self, device: &wgpu::Device) -> BindGroup;
     fn get_system_name(&self) -> String;
+    fn register(self, resources: &mut Resources, device: &wgpu::Device);
 }
 
 pub struct Resources {
     //For quick bind_group reading, that avoids vtable lookups
     pub bind_groups: IndexMap<TypeId, wgpu::BindGroup>,
-    resource_map: HashMap<TypeId, Box<dyn Any>>,
+    pub resource_map: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl Resources {
@@ -47,12 +48,10 @@ impl Resources {
             resource_map: HashMap::new(),
         }
     }
-    pub fn register<T: System + 'static>(&mut self, system: T, device: &wgpu::Device) {
-        let type_id = TypeId::of::<T>();
-        self.bind_groups
-            .insert(type_id, system.make_bind_group(device));
-        self.resource_map.insert(type_id, Box::new(system));
-    }
+}
+
+pub trait Register {
+    fn register(self, resources: &mut Resources, device: &wgpu::Device);
 }
 
 impl Default for Resources {

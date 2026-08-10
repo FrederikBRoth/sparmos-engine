@@ -21,7 +21,7 @@ impl World {
     }
 
     pub fn add_system<T: System + 'static>(&mut self, system: T) {
-        self.resources.register(system, &self.device);
+        system.register(&mut self.resources, &self.device);
     }
     #[inline]
     pub fn add_entity<B: DynamicBundle>(&mut self, bundle: B) -> Entity {
