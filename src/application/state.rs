@@ -317,7 +317,7 @@ impl State {
         self.world
             .query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
                 |resources, (camera, camera_animator)| {
-                    let camera_system = resources.get_system_mut::<CameraSystem>();
+                    let camera_system = resources.get_system_mut::<CameraSystem>().unwrap();
                     camera_system.update_camera(dt, &self.engine.render_context, camera);
                     camera_animator.update(dt.as_secs_f32(), camera);
                 },
@@ -533,39 +533,39 @@ impl State {
                     //         // &self.proxy.clone().unwrap(),
                     //     );
                     // }
-                    let computes = self.world.resources.get_system_mut::<ComputeSystem>();
+                    if let Some(computes) = self.world.resources.get_system_mut::<ComputeSystem>() {
+                        for (compute) in self.world.entities.query::<&ComputeHandle>().iter() {
+                            let compute_pipeline = computes.get(*compute).unwrap();
+                            if compute_pipeline.pending {
+                                continue;
+                            }
+                            let num_dispatches = compute_pipeline.length.div_ceil(64) as u32;
 
-                    for (compute) in self.world.entities.query::<&ComputeHandle>().iter() {
-                        let compute_pipeline = computes.get(*compute).unwrap();
-                        if compute_pipeline.pending {
-                            continue;
-                        }
-                        let num_dispatches = compute_pipeline.length.div_ceil(64) as u32;
+                            {
+                                let mut pass = encoder.begin_compute_pass(&Default::default());
 
-                        {
-                            let mut pass = encoder.begin_compute_pass(&Default::default());
-
-                            pass.set_pipeline(&compute_pipeline.pipeline);
-                            pass.set_bind_group(
+                                pass.set_pipeline(&compute_pipeline.pipeline);
+                                pass.set_bind_group(
+                                    0,
+                                    compute_pipeline.input_buffer.bind_group.as_ref().unwrap(),
+                                    &[],
+                                );
+                                pass.set_bind_group(
+                                    1,
+                                    compute_pipeline.output_buffer.bind_group.as_ref().unwrap(),
+                                    &[],
+                                );
+                                pass.dispatch_workgroups(num_dispatches, 1, 1);
+                            }
+                            encoder.copy_buffer_to_buffer(
+                                &compute_pipeline.output_buffer.buffer,
                                 0,
-                                compute_pipeline.input_buffer.bind_group.as_ref().unwrap(),
-                                &[],
+                                &compute_pipeline.temp_buffer,
+                                0,
+                                compute_pipeline.output_buffer.buffer.size(),
                             );
-                            pass.set_bind_group(
-                                1,
-                                compute_pipeline.output_buffer.bind_group.as_ref().unwrap(),
-                                &[],
-                            );
-                            pass.dispatch_workgroups(num_dispatches, 1, 1);
+                            compute_started = true;
                         }
-                        encoder.copy_buffer_to_buffer(
-                            &compute_pipeline.output_buffer.buffer,
-                            0,
-                            &compute_pipeline.temp_buffer,
-                            0,
-                            compute_pipeline.output_buffer.buffer.size(),
-                        );
-                        compute_started = true;
                     }
                 }
 

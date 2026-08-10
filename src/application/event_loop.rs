@@ -177,10 +177,12 @@ where
 
                     EngineEvent::ComputeResult(package) => {
                         let state = self.state.as_mut().unwrap();
-                        let compute_system =
-                            state.world.resources.get_system_mut::<ComputeSystem>();
-                        compute_system.get(package.handle).unwrap().pending = false;
-                        // println!("COMPUTE OUTPUT: {:?}", package.data)
+                        if let Some(computes) =
+                            state.world.resources.get_system_mut::<ComputeSystem>()
+                        {
+                            computes.get(package.handle).unwrap().pending = false;
+                            // println!("COMPUTE OUTPUT: {:?}", package.data)
+                        }
                     }
                 }
             }
@@ -231,27 +233,27 @@ where
                 self.last_time = web_time::Instant::now();
 
                 state.render(dt, game);
-                let computes = state.world.resources.get_system_mut::<ComputeSystem>();
 
-                for compute_handle in state.world.entities.query::<&ComputeHandle>().iter() {
-                    let compute = computes.get(*compute_handle).unwrap();
+                if let Some(computes) = state.world.resources.get_system_mut::<ComputeSystem>() {
+                    for compute_handle in state.world.entities.query::<&ComputeHandle>().iter() {
+                        let compute = computes.get(*compute_handle).unwrap();
 
-                    if !compute.pending {
-                        compute.pending = true;
-                        readback(
-                            &compute.temp_buffer,
-                            *compute_handle,
-                            &self.proxy.clone().unwrap(),
-                        );
+                        if !compute.pending {
+                            compute.pending = true;
+                            readback(
+                                &compute.temp_buffer,
+                                *compute_handle,
+                                &self.proxy.clone().unwrap(),
+                            );
+                        }
                     }
+                    state
+                        .engine
+                        .render_context
+                        .device
+                        .poll(wgpu::PollType::Poll)
+                        .ok();
                 }
-                state
-                    .engine
-                    .render_context
-                    .device
-                    .poll(wgpu::PollType::Poll)
-                    .ok();
-
                 state.update(dt);
 
                 game.update(dt, &mut state.engine, &mut state.world);
