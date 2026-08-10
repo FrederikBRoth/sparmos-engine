@@ -180,9 +180,7 @@ where
                         let compute_system =
                             state.world.resources.get_system_mut::<ComputeSystem>();
                         compute_system.get(package.handle).unwrap().pending = false;
-                        // for item in package.data.iter() {
-                        //     println!("yo: {}", item)
-                        // }
+                        // println!("COMPUTE OUTPUT: {:?}", package.data)
                     }
                 }
             }
