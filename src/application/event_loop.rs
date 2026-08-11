@@ -10,7 +10,7 @@ use winit::{
 use crate::{
     application::state::{Game, State},
     core::render::ComputeHandle,
-    systems::compute::{Compute, ComputeSystem},
+    systems::compute::ComputeSystem,
 };
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -40,7 +40,6 @@ where
     pub state: Option<State>,
     proxy: Option<EventLoopProxy<UserEvent<U>>>,
     last_time: web_time::Instant,
-    readback_pending: bool,
 
     #[cfg(target_arch = "wasm32")]
     pending: std::rc::Rc<std::cell::RefCell<Option<(State, Box<dyn Game>)>>>,
@@ -65,7 +64,6 @@ where
             game_loop: Some(Box::new(game_loop)),
             proxy: Some(event_loop.create_proxy()),
             last_time: web_time::Instant::now(),
-            readback_pending: false,
             #[cfg(target_arch = "wasm32")]
             pending: std::rc::Rc::new(std::cell::RefCell::new(None)),
         }

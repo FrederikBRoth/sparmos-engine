@@ -1,6 +1,6 @@
 use std::mem;
 
-use wgpu::{BindGroup, BufferUsages, util::DeviceExt};
+use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -58,7 +58,7 @@ pub struct Buffer {
 impl Buffer {
     fn create_bind_group(&mut self, buffer_type: &BufferType, device: &wgpu::Device) {
         let bind_group = match buffer_type {
-            BufferType::StorageBuffer(params) => {
+            BufferType::StorageBuffer(_params) => {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     layout: &self.bind_group_layout,
                     entries: &[wgpu::BindGroupEntry {
@@ -68,7 +68,7 @@ impl Buffer {
                     label: Some("Quad Color Bind Group"),
                 })
             }
-            BufferType::UniformBuffer(params) => {
+            BufferType::UniformBuffer(_params) => {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     layout: &self.bind_group_layout,
                     entries: &[wgpu::BindGroupEntry {
@@ -166,7 +166,7 @@ impl Buffer {
         let mut buffer = Buffer::new_layout(output_size, device, &buffer_type);
 
         let bind_group = match buffer_type {
-            BufferType::StorageBuffer(params) => {
+            BufferType::StorageBuffer(_params) => {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     layout: &buffer.bind_group_layout,
                     entries: &[wgpu::BindGroupEntry {
@@ -176,7 +176,7 @@ impl Buffer {
                     label: Some("Quad Color Bind Group"),
                 })
             }
-            BufferType::UniformBuffer(params) => {
+            BufferType::UniformBuffer(_params) => {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     layout: &buffer.bind_group_layout,
                     entries: &[wgpu::BindGroupEntry {

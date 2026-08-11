@@ -1,11 +1,10 @@
 use std::any::TypeId;
 
 use cgmath::Vector3;
-use wgpu::ShaderStages;
 
 use crate::core::{
     buffer::{Buffer, BufferType, UniformParameters},
-    resource::{GpuBindable, Register, Resources, System},
+    resource::{GpuBindable, Resources, System},
 };
 
 const MAX_LIGHTS: usize = 16;

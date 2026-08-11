@@ -1,8 +1,6 @@
-use std::fmt::format;
-
 use egui::{
     Area, Color32, CursorIcon, Id, InnerResponse, Order, Panel, Pos2, Rect, Response, Sense, Ui,
-    UiBuilder, Vec2, Window, pos2, vec2,
+    UiBuilder, Vec2, pos2, vec2,
 };
 
 pub fn tui_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
@@ -88,7 +86,7 @@ pub enum TuiBorder {
     SoftLines,
 }
 #[derive(Clone)]
-struct TuiWindowState {
+pub struct TuiWindowState {
     pub pos: Pos2,
     pub size: Vec2,
 }
@@ -199,7 +197,7 @@ impl TuiWindow {
 
 pub struct TuiPanel {
     panel: Panel,
-    border_type: TuiBorder,
+    _border_type: TuiBorder,
 }
 
 impl TuiPanel {
@@ -264,17 +262,20 @@ impl TuiPanel {
 
             (galley.size().x, galley.size().y)
         });
-        self.panel = self.panel.min_size((height * (cols + 3) as f32));
+        self.panel = self.panel.min_size(height * (cols + 3) as f32);
         self
     }
 
-    fn new(panel: Panel, border_type: TuiBorder) -> Self {
-        TuiPanel { panel, border_type }
+    fn new(panel: Panel, _border_type: TuiBorder) -> Self {
+        TuiPanel {
+            panel,
+            _border_type,
+        }
     }
 
     pub fn show<R>(self, ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
         self.panel.show(ui, |ui| {
-            let (inner, outer, _sense) = draw_tui_border(ui, None, 0.0);
+            let (inner, _, _) = draw_tui_border(ui, None, 0.0);
             // painter.rect_filled(inner, 0.0, Color32::LIGHT_GRAY);
 
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));

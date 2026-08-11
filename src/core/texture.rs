@@ -27,7 +27,7 @@ impl GpuBindable for Texture {
         &self.bind_group_layout
     }
 
-    fn make_bind_group(&self, device: &wgpu::Device) -> BindGroup {
+    fn make_bind_group(&self, _device: &wgpu::Device) -> BindGroup {
         todo!()
     }
 }

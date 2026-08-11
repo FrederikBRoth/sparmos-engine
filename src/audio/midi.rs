@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use midly::{MetaMessage, MidiMessage, Smf, TrackEvent, TrackEventKind};
+use midly::{MetaMessage, MidiMessage, Smf, TrackEventKind};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MidiNote {
@@ -26,7 +26,7 @@ impl Midi {
 
         let beat_length = match smf.header.timing {
             midly::Timing::Metrical(u15) => u15.as_int(),
-            midly::Timing::Timecode(fps, _) => 480,
+            midly::Timing::Timecode(_, _) => 480,
         };
         let mut active_notes: HashMap<(u8, u8), u32> = HashMap::new();
         let mut channels: HashMap<u8, Vec<MidiNote>> = HashMap::new();

@@ -1,9 +1,7 @@
-use std::{any::TypeId, mem, sync::Arc};
+use std::{any::TypeId, mem};
 
-use indexmap::IndexMap;
 use slotmap::SlotMap;
-use tokio::sync::mpsc::channel;
-use wgpu::{BindGroupLayout, BufferUsages, ComputePipeline, RenderPipeline, ShaderStages};
+use wgpu::{BindGroupLayout, BufferUsages, ComputePipeline, ShaderStages};
 
 use crate::core::{
     buffer::{Buffer, BufferType, StorageParameters},

@@ -5,15 +5,11 @@ use std::vec;
 
 #[cfg(feature = "gui")]
 use egui::Ui;
-use wgpu::{
-    CommandEncoder, ComputePipeline, CurrentSurfaceTexture, InstanceDescriptor, SurfaceTexture,
-};
+use wgpu::{CurrentSurfaceTexture, InstanceDescriptor};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
-use winit::event_loop::EventLoopProxy;
 use winit::window::Window;
 
-use crate::application::event_loop::readback;
 use crate::application::gui::EguiRenderer;
 use crate::core::engine::{Arguments, Engine, RenderCommands};
 use crate::core::entities::World;
@@ -331,7 +327,6 @@ impl State {
 
         self.window.request_redraw();
 
-        let mut compute_started = false;
         match self.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(surface_texture) => {
                 let view = surface_texture
@@ -523,18 +518,8 @@ impl State {
                 }
 
                 {
-                    let scene = &self.engine.render_context.gpu_objects;
-
-                    // for (compute) in self.world.entities.query::<&ComputeHandle>().iter() {
-                    //     let compute_pipeline = scene.computes.get(*compute).unwrap();
-                    //     readback(
-                    //         &self.engine.render_context.device,
-                    //         &compute_pipeline.temp_buffer,
-                    //         // &self.proxy.clone().unwrap(),
-                    //     );
-                    // }
                     if let Some(computes) = self.world.resources.get_system_mut::<ComputeSystem>() {
-                        for (compute) in self.world.entities.query::<&ComputeHandle>().iter() {
+                        for compute in self.world.entities.query::<&ComputeHandle>().iter() {
                             let compute_pipeline = computes.get(*compute).unwrap();
                             if compute_pipeline.pending {
                                 continue;
@@ -568,7 +553,6 @@ impl State {
                                 0,
                                 compute_pipeline.output_buffer.buffer.size(),
                             );
-                            compute_started = true;
                         }
                     }
                 }

@@ -9,7 +9,6 @@ use crate::{
         engine::Engine, entities::World, geometry::Mesh, instance::InstanceControllerTrait,
         material::Material, post_processing::PostProcessHandler, texture::TextureSampleView,
     },
-    systems::compute::Compute,
 };
 
 pub struct RenderContext {
