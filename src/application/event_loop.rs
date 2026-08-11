@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use wgpu::{BufferView, MapRangeError};
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -15,7 +16,7 @@ use crate::{
 use wasm_bindgen::prelude::*;
 
 pub struct ComputePackage {
-    data: Vec<u32>,
+    data: Result<BufferView, MapRangeError>,
     handle: ComputeHandle,
 }
 pub enum EngineEvent {
@@ -180,8 +181,12 @@ where
                         if let Some(computes) =
                             state.world.resources.get_system_mut::<ComputeSystem>()
                         {
-                            computes.get(package.handle).unwrap().pending = false;
-                            // println!("COMPUTE OUTPUT: {:?}", package.data)
+                            let compute = computes.get(package.handle).unwrap();
+                            compute.read_result(package.data);
+                            compute.temp_buffer.unmap();
+                            compute.pending = false;
+                            // compute.read_result(package.data);
+                            // println!("tawd");
                         }
                     }
                 }
@@ -235,6 +240,13 @@ where
                 state.render(dt, game);
 
                 if let Some(computes) = state.world.resources.get_system_mut::<ComputeSystem>() {
+                    state
+                        .engine
+                        .render_context
+                        .device
+                        .poll(wgpu::PollType::Poll)
+                        .ok();
+
                     for compute_handle in state.world.entities.query::<&ComputeHandle>().iter() {
                         let compute = computes.get(*compute_handle).unwrap();
 
@@ -247,14 +259,9 @@ where
                             );
                         }
                     }
-                    state
-                        .engine
-                        .render_context
-                        .device
-                        .poll(wgpu::PollType::Poll)
-                        .ok();
                 }
                 state.update(dt);
+                // println!("test");
 
                 game.update(dt, &mut state.engine, &mut state.world);
             }
@@ -296,15 +303,9 @@ pub fn readback<U: Send + 'static>(
             let slice = buffer.slice(..);
             let data = slice.get_mapped_range();
 
-            let result = bytemuck::cast_slice::<u8, u32>(&data.unwrap())
-                .clone()
-                .to_vec();
-
-            buffer.unmap();
-
             let _ = proxy.send_event(UserEvent::EngineEvent(EngineEvent::ComputeResult(
                 ComputePackage {
-                    data: result,
+                    data,
                     handle: handle,
                 },
             )));

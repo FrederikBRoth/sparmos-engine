@@ -125,21 +125,12 @@ impl Buffer {
                 (storage_bind_group_layout, storage_buffer)
             }
             BufferType::UniformBuffer(params) => {
-                let uniform_buffer = if params.init {
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Storage"),
-                        contents: bytemuck::cast_slice(instances),
-                        // usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                        usage: params.usage,
-                    })
-                } else {
-                    device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("output"),
-                        size: std::mem::size_of_val(instances) as u64,
-                        usage: params.usage,
-                        mapped_at_creation: false,
-                    })
-                };
+                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Storage"),
+                    contents: bytemuck::cast_slice(instances),
+                    // usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    usage: params.usage,
+                });
                 let uniform_bind_group_layout =
                     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                         entries: &[wgpu::BindGroupLayoutEntry {
