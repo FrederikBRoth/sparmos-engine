@@ -1,4 +1,6 @@
-use wgpu::{BufferUsages, util::DeviceExt};
+use std::mem;
+
+use wgpu::{BindGroup, BufferUsages, util::DeviceExt};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -54,69 +56,55 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    pub fn new<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
-        instances: &[T],
-        device: &wgpu::Device,
-        buffer_type: BufferType,
-    ) -> Self {
-        let mut buffer = Buffer::new_layout(instances, device, &buffer_type);
-
+    fn create_bind_group(&mut self, buffer_type: &BufferType, device: &wgpu::Device) {
         let bind_group = match buffer_type {
             BufferType::StorageBuffer(params) => {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    layout: &buffer.bind_group_layout,
+                    layout: &self.bind_group_layout,
                     entries: &[wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: buffer.buffer.as_entire_binding(),
+                        resource: self.buffer.as_entire_binding(),
                     }],
                     label: Some("Quad Color Bind Group"),
                 })
             }
             BufferType::UniformBuffer(params) => {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    layout: &buffer.bind_group_layout,
+                    layout: &self.bind_group_layout,
                     entries: &[wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: buffer.buffer.as_entire_binding(),
+                        resource: self.buffer.as_entire_binding(),
                     }],
                     label: Some("Uniform Buffer"),
                 })
             }
         };
-        buffer.bind_group = Some(bind_group);
+
+        self.bind_group = Some(bind_group)
+    }
+    pub fn new_init<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        instances: &[T],
+        device: &wgpu::Device,
+        buffer_type: BufferType,
+    ) -> Self {
+        let mut buffer = Buffer::new_layout_init(instances, device, &buffer_type);
+
+        buffer.create_bind_group(&buffer_type, device);
         buffer
     }
-
-    pub fn update<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
-        &self,
-        queue: &wgpu::Queue,
-        instance: &[T],
-    ) {
-        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(instance));
-    }
-
-    pub fn new_layout<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+    pub fn new_layout_init<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
         instances: &[T],
         device: &wgpu::Device,
         buffer_type: &BufferType,
     ) -> Self {
         let (bind_group_layout, buffer) = match buffer_type {
             BufferType::StorageBuffer(params) => {
-                let storage_buffer = if params.init {
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("input"),
-                        contents: bytemuck::cast_slice(instances),
-                        // usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                        usage: params.usage,
-                    })
-                } else {
-                    device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("output"),
-                        size: std::mem::size_of_val(instances) as u64,
-                        usage: params.usage,
-                        mapped_at_creation: false,
-                    })
-                };
+                let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("input"),
+                    contents: bytemuck::cast_slice(instances),
+                    // usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    usage: params.usage,
+                });
                 let storage_bind_group_layout =
                     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                         entries: &[wgpu::BindGroupLayoutEntry {
@@ -152,6 +140,109 @@ impl Buffer {
                         mapped_at_creation: false,
                     })
                 };
+                let uniform_bind_group_layout =
+                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        entries: &[wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: params.shader_stages,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        }],
+                        label: Some("light_bind_group_layout"),
+                    });
+                (uniform_bind_group_layout, uniform_buffer)
+            }
+        };
+
+        Self {
+            buffer,
+            bind_group_layout,
+            bind_group: None,
+        }
+    }
+
+    pub fn new<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        size: usize,
+        device: &wgpu::Device,
+        buffer_type: BufferType,
+    ) -> Self {
+        let output_size = mem::size_of::<T>() * size;
+
+        let mut buffer = Buffer::new_layout(output_size, device, &buffer_type);
+
+        let bind_group = match buffer_type {
+            BufferType::StorageBuffer(params) => {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &buffer.bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buffer.buffer.as_entire_binding(),
+                    }],
+                    label: Some("Quad Color Bind Group"),
+                })
+            }
+            BufferType::UniformBuffer(params) => {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &buffer.bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buffer.buffer.as_entire_binding(),
+                    }],
+                    label: Some("Uniform Buffer"),
+                })
+            }
+        };
+        buffer.bind_group = Some(bind_group);
+        buffer
+    }
+
+    pub fn update<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        &self,
+        queue: &wgpu::Queue,
+        instance: &[T],
+    ) {
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(instance));
+    }
+
+    pub fn new_layout(size: usize, device: &wgpu::Device, buffer_type: &BufferType) -> Self {
+        let (bind_group_layout, buffer) = match buffer_type {
+            BufferType::StorageBuffer(params) => {
+                let storage_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("output"),
+                    size: size as u64,
+                    usage: params.usage,
+                    mapped_at_creation: false,
+                });
+                let storage_bind_group_layout =
+                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        entries: &[wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: params.shader_stages,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage {
+                                    read_only: params.read_only,
+                                },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        }],
+                        label: None,
+                    });
+
+                (storage_bind_group_layout, storage_buffer)
+            }
+            BufferType::UniformBuffer(params) => {
+                let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("output"),
+                    size: size as u64,
+                    usage: params.usage,
+                    mapped_at_creation: false,
+                });
                 let uniform_bind_group_layout =
                     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                         entries: &[wgpu::BindGroupLayoutEntry {

@@ -1,12 +1,12 @@
-use std::{any::TypeId, sync::Arc};
+use std::{any::TypeId, mem, sync::Arc};
 
 use indexmap::IndexMap;
 use slotmap::SlotMap;
 use tokio::sync::mpsc::channel;
-use wgpu::{BindGroupLayout, ComputePipeline, RenderPipeline};
+use wgpu::{BindGroupLayout, BufferUsages, ComputePipeline, RenderPipeline, ShaderStages};
 
 use crate::core::{
-    buffer::Buffer,
+    buffer::{Buffer, BufferType, StorageParameters},
     render::{ComputeHandle, RenderContext},
     resource::System,
 };
@@ -15,10 +15,73 @@ use crate::core::{
 pub struct Compute {
     pub pending: bool,
     pub pipeline: ComputePipeline,
-    pub input_buffer: Buffer,
+    pub input_buffers: Vec<Buffer>,
     pub output_buffer: Buffer,
     pub temp_buffer: wgpu::Buffer,
     pub length: u32,
+    pub data: Vec<u8>,
+}
+
+pub struct ComputeBuilder {
+    size: usize,
+    input_buffers: Vec<Buffer>,
+}
+
+impl ComputeBuilder {
+    pub fn new(size: usize) -> Self {
+        Self {
+            input_buffers: Vec::new(),
+            size,
+        }
+    }
+
+    pub fn add_input_buffer<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        mut self,
+        data: &[T],
+        device: &wgpu::Device,
+    ) -> Self {
+        assert_eq!(data.len(), self.size);
+        let buffer = Buffer::new_init(
+            data,
+            device,
+            BufferType::StorageBuffer(StorageParameters {
+                shader_stages: ShaderStages::COMPUTE,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                ..Default::default()
+            }),
+        );
+        self.input_buffers.push(buffer);
+        self
+    }
+
+    pub fn build<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        self,
+        render_context: &mut RenderContext,
+        shader: &str,
+    ) -> Compute {
+        let output_buffer = Buffer::new::<T>(
+            self.size,
+            &render_context.device,
+            BufferType::StorageBuffer(StorageParameters {
+                shader_stages: ShaderStages::COMPUTE,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                init: false,
+                read_only: false,
+            }),
+        );
+
+        //Preallocate output data for fast writing
+        let output_size = mem::size_of::<T>() * self.size;
+        let data = vec![0u8; output_size];
+        Compute::new(
+            render_context,
+            self.input_buffers,
+            output_buffer,
+            shader,
+            self.size,
+            data,
+        )
+    }
 }
 
 //marker struct for ECS
@@ -28,20 +91,23 @@ pub struct ComputeObject;
 impl Compute {
     pub fn new(
         render_context: &mut RenderContext,
-        input_buffer: Buffer,
+        input_buffers: Vec<Buffer>,
         output_buffer: Buffer,
         shader: &str,
         length: usize,
+        data: Vec<u8>,
     ) -> Compute {
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
-        bind_group_layouts.push(Some(&input_buffer.bind_group_layout));
+        for buffer in input_buffers.iter() {
+            bind_group_layouts.push(Some(&buffer.bind_group_layout));
+        }
         bind_group_layouts.push(Some(&output_buffer.bind_group_layout));
 
         let temp_buffer = render_context
             .device
             .create_buffer(&wgpu::BufferDescriptor {
                 label: Some("temp"),
-                size: input_buffer.buffer.size(),
+                size: output_buffer.buffer.size(),
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             });
@@ -70,12 +136,21 @@ impl Compute {
         let compute = Compute {
             pending: false,
             pipeline,
-            input_buffer: input_buffer,
+            input_buffers: input_buffers,
             output_buffer: output_buffer,
             temp_buffer,
             length: length as u32,
+            data,
         };
         compute
+    }
+    pub fn read_result(&mut self, data: Result<wgpu::BufferView, wgpu::MapRangeError>) {
+        let mapped = data.unwrap();
+        self.data.copy_from_slice(&mapped);
+    }
+
+    pub fn result_as<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(&self) -> &[T] {
+        bytemuck::cast_slice(&self.data)
     }
 }
 
@@ -88,15 +163,7 @@ impl ComputeSystem {
         self.computes.get_mut(handle)
     }
 
-    pub fn add(
-        &mut self,
-        render_context: &mut RenderContext,
-        input_buffer: Buffer,
-        output_buffer: Buffer,
-        shader: &str,
-        length: usize,
-    ) -> ComputeHandle {
-        let compute = Compute::new(render_context, input_buffer, output_buffer, shader, length);
+    pub fn add(&mut self, compute: Compute) -> ComputeHandle {
         self.computes.insert(compute)
     }
 

@@ -65,7 +65,7 @@ pub struct LightSystem {
 impl LightSystem {
     pub fn init(lights: &[Light], device: &wgpu::Device) -> Self {
         let light_block = Light::to_raw_list(lights);
-        let storage_buffer = Buffer::new_layout(
+        let storage_buffer = Buffer::new_layout_init(
             &[light_block],
             device,
             &BufferType::UniformBuffer(UniformParameters::default()),

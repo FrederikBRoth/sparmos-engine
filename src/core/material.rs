@@ -55,29 +55,29 @@ impl MaterialBuilder {
         }
     }
 
-    pub fn add_layout<T: GpuBindable>(&mut self, name: &str, bindable: &T) -> &mut Self {
+    pub fn add_layout<T: GpuBindable>(mut self, name: &str, bindable: &T) -> Self {
         self.layouts
             .insert(name.to_string(), bindable.get_bind_group_layout().clone());
         self
     }
 
-    pub fn add_layout_raw(&mut self, name: &str, layout: &BindGroupLayout) -> &mut Self {
+    pub fn add_layout_raw(mut self, name: &str, layout: &BindGroupLayout) -> Self {
         self.layouts.insert(name.to_string(), layout.clone());
         self
     }
 
     //Will lookup shader in Global Context
-    pub fn add_shader(&mut self, shader: &str) -> &mut Self {
+    pub fn add_shader(mut self, shader: &str) -> Self {
         self.shader = shader.to_string();
         self
     }
 
-    pub fn add_buffer(&mut self, handle: u32, buffer: Buffer) -> &mut Self {
+    pub fn add_buffer(mut self, handle: u32, buffer: Buffer) -> Self {
         self.buffers.insert(handle, buffer);
         self
     }
 
-    pub fn add_texture(&mut self, texture: Texture) -> &mut Self {
+    pub fn add_texture(mut self, texture: Texture) -> Self {
         self.layouts.insert(
             texture.label.clone(),
             texture.get_bind_group_layout().clone(),
@@ -87,7 +87,7 @@ impl MaterialBuilder {
     }
 
     pub fn build(
-        &self,
+        self,
         mesh: &MeshHandle,
         instance_controller: &InstanceControllerHandle,
         render_context: &mut RenderContext,

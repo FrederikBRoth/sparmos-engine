@@ -545,13 +545,17 @@ impl State {
                                 let mut pass = encoder.begin_compute_pass(&Default::default());
 
                                 pass.set_pipeline(&compute_pipeline.pipeline);
+                                let mut bind_group_index = 0;
+                                for input_buffer in compute_pipeline.input_buffers.iter() {
+                                    pass.set_bind_group(
+                                        bind_group_index,
+                                        input_buffer.bind_group.as_ref().unwrap(),
+                                        &[],
+                                    );
+                                    bind_group_index += 1;
+                                }
                                 pass.set_bind_group(
-                                    0,
-                                    compute_pipeline.input_buffer.bind_group.as_ref().unwrap(),
-                                    &[],
-                                );
-                                pass.set_bind_group(
-                                    1,
+                                    bind_group_index,
                                     compute_pipeline.output_buffer.bind_group.as_ref().unwrap(),
                                     &[],
                                 );
