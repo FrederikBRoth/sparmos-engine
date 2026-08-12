@@ -77,16 +77,6 @@ impl GpuBindable for LightSystem {
     fn get_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.storage_buffer.bind_group_layout
     }
-    fn make_bind_group(&self, device: &wgpu::Device) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.storage_buffer.bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: self.storage_buffer.buffer.as_entire_binding(),
-            }],
-            label: Some("Quad Color Bind Group"),
-        })
-    }
 }
 
 impl System for LightSystem {
@@ -94,13 +84,15 @@ impl System for LightSystem {
         "Light System".to_string()
     }
 
-    fn register(self, resources: &mut Resources, device: &wgpu::Device) {
+    fn register(self, resources: &mut Resources) {
         let type_id = TypeId::of::<Self>();
 
-        resources
-            .bind_groups
-            .insert(type_id, self.make_bind_group(device));
-
+        let bind_group_layout = self.get_bind_group_layout().clone();
+        let bind_group = self.storage_buffer.bind_group.as_ref().unwrap().clone();
         resources.resource_map.insert(type_id, Box::new(self));
+        resources
+            .bind_group_layouts
+            .insert(type_id, bind_group_layout);
+        resources.bind_groups.insert(type_id, bind_group);
     }
 }

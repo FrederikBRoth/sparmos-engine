@@ -3,19 +3,29 @@ use slotmap::new_key_type;
 use wgpu::{BindGroupLayout, Device, PipelineLayout, RenderPipeline, ShaderModule, TextureFormat};
 
 use crate::core::{
-    buffer::Buffer,
-    geometry::VertexBufferLayoutOwned,
-    render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
-    resource::GpuBindable,
+    buffer::{Buffer, BufferKey},
+    geometry::{Vertex, VertexBufferLayoutOwned, VertexLayoutKey},
+    instance::InstanceToRaw,
+    render::{MaterialHandle, RenderContext},
+    resource::Resources,
     texture::Texture,
 };
 
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct MaterialKey {
+    pub buffers: Vec<BufferKey>,
+    pub texture: Option<String>,
+    pub vertex_layout: VertexLayoutKey,
+    pub instance_layout: VertexLayoutKey,
+    pub shader: String,
+}
+
 #[derive(Clone)]
 pub struct Material {
+    pub key: MaterialKey,
     pub pipeline_layout: PipelineLayout,
     pub pipeline: RenderPipeline,
     pub texture: Option<Texture>,
-    pub layouts: IndexMap<String, BindGroupLayout>,
     pub buffers: IndexMap<u32, Buffer>,
     pub ic_buffer_layout: VertexBufferLayoutOwned,
     pub mesh_buffer_layout: VertexBufferLayoutOwned,
@@ -38,34 +48,41 @@ impl Material {
 
 new_key_type! { pub struct BufferHandle; }
 pub struct MaterialBuilder {
-    layouts: IndexMap<String, BindGroupLayout>,
     buffers: IndexMap<u32, Buffer>,
-
     texture: Option<Texture>,
     shader: String,
 }
 
 impl MaterialBuilder {
+    fn key(
+        &self,
+        vertex_layout: &VertexBufferLayoutOwned,
+        instance_layout: &VertexBufferLayoutOwned,
+    ) -> MaterialKey {
+        let texture_key = self.texture.as_ref().map(|texture| texture.label.clone());
+
+        let buffers = self
+            .buffers
+            .values()
+            .map(|buffer| buffer.key.clone())
+            .collect::<Vec<BufferKey>>();
+
+        MaterialKey {
+            buffers,
+            texture: texture_key,
+            vertex_layout: vertex_layout.key(),
+            instance_layout: instance_layout.key(),
+            shader: self.shader.clone(),
+        }
+    }
+
     pub fn new() -> Self {
         MaterialBuilder {
-            layouts: IndexMap::new(),
             buffers: IndexMap::new(),
             texture: None,
             shader: String::new(),
         }
     }
-
-    pub fn add_layout<T: GpuBindable>(mut self, name: &str, bindable: &T) -> Self {
-        self.layouts
-            .insert(name.to_string(), bindable.get_bind_group_layout().clone());
-        self
-    }
-
-    pub fn add_layout_raw(mut self, name: &str, layout: &BindGroupLayout) -> Self {
-        self.layouts.insert(name.to_string(), layout.clone());
-        self
-    }
-
     //Will lookup shader in Global Context
     pub fn add_shader(mut self, shader: &str) -> Self {
         self.shader = shader.to_string();
@@ -78,39 +95,36 @@ impl MaterialBuilder {
     }
 
     pub fn add_texture(mut self, texture: Texture) -> Self {
-        self.layouts.insert(
-            texture.label.clone(),
-            texture.get_bind_group_layout().clone(),
-        );
         self.texture = Some(texture);
         self
     }
 
-    pub fn build(
+    pub fn build<V: Vertex, I: InstanceToRaw>(
         self,
-        mesh: &MeshHandle,
-        instance_controller: &InstanceControllerHandle,
+        resources: &Resources,
         render_context: &mut RenderContext,
     ) -> MaterialHandle {
-        let mesh = &render_context
-            .gpu_objects
-            .meshes
-            .get(*mesh)
-            .unwrap()
-            .buffer_layout;
-        let instance_controller = render_context
-            .gpu_objects
-            .instance_controllers
-            .get(*instance_controller)
-            .unwrap()
-            .layout();
+        let shader = render_context.shaders.get(&self.shader).unwrap();
+        let vertex_layout = V::layout();
+        let instance_layout = I::layout();
 
-        let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> =
-            self.layouts.iter().map(|(_, v)| Some(v)).collect();
+        let key = self.key(&vertex_layout, &instance_layout);
+
+        if let Some(handle) = render_context.gpu_objects.get_material(&key) {
+            return handle;
+        }
+        let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
+
+        for system in resources.get_bind_group_layouts() {
+            bind_group_layouts.push(system);
+        }
+        if let Some(texture) = &self.texture {
+            bind_group_layouts.push(Some(&texture.bind_group_layout));
+        }
         for buffer in self.buffers.values() {
             bind_group_layouts.push(Some(&buffer.bind_group_layout));
         }
-        let shader = render_context.shaders.get(&self.shader).unwrap();
+
         //First check is if a texture was passed to the material. If it was, do a textured pipeline, if
         //not go primitive
         let render_pipeline_layout =
@@ -128,20 +142,25 @@ impl MaterialBuilder {
             &render_pipeline_layout,
             &self.texture,
             shader,
-            mesh,
-            instance_controller,
+            &vertex_layout,
+            &instance_layout,
         );
         let material = Material {
+            key: key.clone(),
             pipeline,
             pipeline_layout: render_pipeline_layout,
-            layouts: self.layouts.clone(),
             texture: self.texture.clone(),
             //TODO FIX
             buffers: self.buffers.clone(),
-            ic_buffer_layout: instance_controller.clone(),
-            mesh_buffer_layout: mesh.clone(),
+            ic_buffer_layout: instance_layout,
+            mesh_buffer_layout: vertex_layout,
         };
-        render_context.gpu_objects.materials.insert(material)
+        let handle = render_context.gpu_objects.materials.insert(material);
+        render_context
+            .gpu_objects
+            .material_lookup
+            .insert(key, handle);
+        handle
     }
 }
 

@@ -13,6 +13,7 @@ use winit::{
 
 use crate::{
     core::{
+        buffer::{Buffer, BufferType, UniformParameters},
         render::RenderContext,
         resource::{GpuBindable, System},
     },
@@ -260,8 +261,7 @@ impl Default for CameraUniform {
 pub struct CameraSystem {
     // pub camera: Camera,
     pub camera_uniform: CameraUniform,
-    pub camera_buffer: wgpu::Buffer,
-    pub camera_bind_group_layout: BindGroupLayout,
+    pub camera_buffer: Buffer,
     pub auto: bool,
     pub speed: f32,
 
@@ -285,36 +285,19 @@ impl CameraSystem {
     pub fn new(speed: f32, sensitivity: f32, device: &Device, camera: &Camera) -> Self {
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(camera);
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // Create layout and bind group for camera
-        let camera_bind_group_layout: wgpu::BindGroupLayout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("camera_bind_group_layout"),
-            });
+        let camera_buffer = Buffer::new_init(
+            &[camera_uniform],
+            device,
+            BufferType::UniformBuffer(UniformParameters::default()),
+        );
 
         log::warn!("Shader");
         Self {
             auto: false,
             speed,
             sensitivity,
-            camera_uniform,
-            camera_bind_group_layout,
             camera_buffer,
+            camera_uniform,
             is_up_pressed: MovementPress::NotPressed,
             is_down_pressed: MovementPress::NotPressed,
             is_forward_pressed: MovementPress::NotPressed,
@@ -489,7 +472,7 @@ impl CameraSystem {
 
         self.camera_uniform.update_view_proj(camera);
         rc.queue.write_buffer(
-            &self.camera_buffer,
+            &self.camera_buffer.buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
@@ -594,17 +577,7 @@ pub fn normalize_and_map_camera_height(x: i64, a: i64, b: i64, start: f32, end: 
 
 impl GpuBindable for CameraSystem {
     fn get_bind_group_layout(&self) -> &BindGroupLayout {
-        &self.camera_bind_group_layout
-    }
-    fn make_bind_group(&self, device: &wgpu::Device) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: self.camera_buffer.as_entire_binding(),
-            }],
-            label: Some("camera_bind_group"),
-        })
+        &self.camera_buffer.bind_group_layout
     }
 }
 
@@ -613,13 +586,15 @@ impl System for CameraSystem {
         "Camera System".to_string()
     }
 
-    fn register(self, resources: &mut crate::core::resource::Resources, device: &wgpu::Device) {
+    fn register(self, resources: &mut crate::core::resource::Resources) {
         let type_id = TypeId::of::<Self>();
 
-        resources
-            .bind_groups
-            .insert(type_id, self.make_bind_group(device));
-
+        let bind_group = self.camera_buffer.bind_group.as_ref().unwrap().clone();
+        let bind_group_layout = self.get_bind_group_layout().clone();
         resources.resource_map.insert(type_id, Box::new(self));
+        resources
+            .bind_group_layouts
+            .insert(type_id, bind_group_layout);
+        resources.bind_groups.insert(type_id, bind_group);
     }
 }

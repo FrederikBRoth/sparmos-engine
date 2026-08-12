@@ -42,7 +42,7 @@ where
             pending: Arc::new(Mutex::new(raw)),
             offset: 0,
             atomic_usize: Arc::new(AtomicUsize::new(len)),
-            buffer_layout: T::desc(),
+            buffer_layout: T::layout(),
             instance_buffer,
         };
         rc.gpu_objects.instance_controllers.insert(Box::new(ic))
@@ -211,7 +211,7 @@ impl Instance {
     }
 }
 pub trait InstanceToRaw {
-    fn desc() -> VertexBufferLayoutOwned;
+    fn layout() -> VertexBufferLayoutOwned;
     fn to_raw(instance: &Instance) -> Self;
 }
 #[repr(C)]
@@ -225,7 +225,7 @@ pub struct GpuInstance {
 }
 
 impl InstanceToRaw for GpuInstance {
-    fn desc() -> VertexBufferLayoutOwned {
+    fn layout() -> VertexBufferLayoutOwned {
         use std::mem;
 
         VertexBufferLayoutOwned {
@@ -275,7 +275,7 @@ pub struct InstanceRaw {
 }
 
 impl InstanceToRaw for InstanceRaw {
-    fn desc() -> VertexBufferLayoutOwned {
+    fn layout() -> VertexBufferLayoutOwned {
         use std::mem;
         VertexBufferLayoutOwned {
             array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,

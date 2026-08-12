@@ -6,8 +6,13 @@ use wgpu::ShaderModule;
 use crate::{
     application::state::DeviceBackend,
     core::{
-        engine::Engine, entities::World, geometry::Mesh, instance::InstanceControllerTrait,
-        material::Material, post_processing::PostProcessHandler, texture::TextureSampleView,
+        engine::Engine,
+        entities::World,
+        geometry::Mesh,
+        instance::InstanceControllerTrait,
+        material::{Material, MaterialKey},
+        post_processing::PostProcessHandler,
+        texture::TextureSampleView,
     },
 };
 
@@ -89,8 +94,10 @@ new_key_type! { pub struct InstanceControllerHandle; }
 
 pub struct GpuObjects {
     pub instance_controllers: SlotMap<InstanceControllerHandle, Box<dyn InstanceControllerTrait>>,
-    pub materials: SlotMap<MaterialHandle, Material>,
     pub meshes: SlotMap<MeshHandle, Mesh>,
+
+    pub materials: SlotMap<MaterialHandle, Material>,
+    pub material_lookup: HashMap<MaterialKey, MaterialHandle>,
 }
 
 impl GpuObjects {
@@ -111,6 +118,11 @@ impl GpuObjects {
             instance_controllers: SlotMap::with_key(),
             materials: SlotMap::with_key(),
             meshes: SlotMap::with_key(),
+            material_lookup: HashMap::new(),
         }
+    }
+
+    pub fn get_material(&mut self, key: &MaterialKey) -> Option<MaterialHandle> {
+        self.material_lookup.get(key).cloned()
     }
 }

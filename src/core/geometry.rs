@@ -2,6 +2,24 @@ use std::mem;
 use wgpu::util::DeviceExt;
 
 use crate::core::render::{MeshHandle, RenderContext};
+
+pub trait Vertex {
+    fn layout() -> VertexBufferLayoutOwned;
+}
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct VertexAttributeKey {
+    pub format: wgpu::VertexFormat,
+    pub offset: u64,
+    pub shader_location: u32,
+}
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct VertexLayoutKey {
+    pub array_stride: u64,
+    pub step_mode: wgpu::VertexStepMode,
+    pub attributes: Vec<VertexAttributeKey>,
+}
+
 #[derive(Clone)]
 pub struct VertexBufferLayoutOwned {
     pub array_stride: u64,
@@ -16,6 +34,22 @@ impl VertexBufferLayoutOwned {
             step_mode: self.step_mode,
             attributes: &self.attributes,
         })
+    }
+
+    pub fn key(&self) -> VertexLayoutKey {
+        VertexLayoutKey {
+            array_stride: self.array_stride,
+            step_mode: self.step_mode,
+            attributes: self
+                .attributes
+                .iter()
+                .map(|a| VertexAttributeKey {
+                    format: a.format,
+                    offset: a.offset,
+                    shader_location: a.shader_location,
+                })
+                .collect::<Vec<VertexAttributeKey>>(),
+        }
     }
 }
 
@@ -42,9 +76,9 @@ pub struct Primitive {
     pub indices: Vec<u32>,
 }
 
-impl Primitive {
-    pub fn make_mb(&self, rc: &mut RenderContext) -> MeshHandle {
-        let buffer_layout = VertexBufferLayoutOwned {
+impl Vertex for Primitive {
+    fn layout() -> VertexBufferLayoutOwned {
+        VertexBufferLayoutOwned {
             array_stride: mem::size_of::<PrimitiveVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: vec![
@@ -69,14 +103,17 @@ impl Primitive {
                     format: wgpu::VertexFormat::Uint32,
                 },
             ],
-        };
+        }
+    }
+}
+impl Primitive {
+    pub fn make_mb(&self, rc: &mut RenderContext) -> MeshHandle {
         let mesh = Mesh::new(
             &rc.device,
             &self.vertices,
             &self.indices,
             self.vertices.len() as u32,
             self.indices.len() as u32,
-            buffer_layout,
         );
 
         rc.gpu_objects.meshes.insert(mesh)
@@ -89,9 +126,9 @@ pub struct Textured {
     pub indices: Vec<u32>,
 }
 
-impl Textured {
-    pub fn make_mb(&self, device: &wgpu::Device) -> Mesh {
-        let buffer_layout = VertexBufferLayoutOwned {
+impl Vertex for Textured {
+    fn layout() -> VertexBufferLayoutOwned {
+        VertexBufferLayoutOwned {
             array_stride: mem::size_of::<TexturedVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: vec![
@@ -111,16 +148,19 @@ impl Textured {
                     format: wgpu::VertexFormat::Float32x2,
                 },
             ],
-        };
-
-        Mesh::new(
+        }
+    }
+}
+impl Textured {
+    pub fn make_mb(&self, device: &wgpu::Device) -> Mesh {
+        let buffer_layout = Mesh::new(
             device,
             &self.vertices,
             &self.indices,
             self.vertices.len() as u32,
             self.indices.len() as u32,
-            buffer_layout,
-        )
+        );
+        buffer_layout
     }
 }
 pub struct Mesh {
@@ -128,7 +168,6 @@ pub struct Mesh {
     pub index_count: u32,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
-    pub buffer_layout: VertexBufferLayoutOwned,
 }
 
 impl Mesh {
@@ -139,7 +178,6 @@ impl Mesh {
         vertex_count: u32,
 
         index_count: u32,
-        buffer_layout: VertexBufferLayoutOwned,
     ) -> Self {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Big Vertex Buffer"),
@@ -158,7 +196,6 @@ impl Mesh {
             index_count,
             vertex_buffer,
             index_buffer,
-            buffer_layout,
         }
     }
 

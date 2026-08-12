@@ -1,6 +1,6 @@
 use std::mem;
 
-use wgpu::util::DeviceExt;
+use wgpu::{BindGroupLayoutEntry, util::DeviceExt};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -48,8 +48,14 @@ impl Default for UniformParameters {
     }
 }
 
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct BufferKey {
+    layout: Vec<BindGroupLayoutEntry>,
+}
+
 #[derive(Clone)]
 pub struct Buffer {
+    pub key: BufferKey,
     pub buffer: wgpu::Buffer,
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub bind_group: Option<wgpu::BindGroup>,
@@ -97,7 +103,7 @@ impl Buffer {
         device: &wgpu::Device,
         buffer_type: &BufferType,
     ) -> Self {
-        let (bind_group_layout, buffer) = match buffer_type {
+        let (bind_group_layout, buffer, key) = match buffer_type {
             BufferType::StorageBuffer(params) => {
                 let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("input"),
@@ -105,24 +111,31 @@ impl Buffer {
                     // usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                     usage: params.usage,
                 });
+                let entries = [wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: params.shader_stages,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage {
+                            read_only: params.read_only,
+                        },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }];
                 let storage_bind_group_layout =
                     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        entries: &[wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: params.shader_stages,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage {
-                                    read_only: params.read_only,
-                                },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        }],
+                        entries: &entries,
                         label: None,
                     });
 
-                (storage_bind_group_layout, storage_buffer)
+                (
+                    storage_bind_group_layout,
+                    storage_buffer,
+                    BufferKey {
+                        layout: entries.to_vec(),
+                    },
+                )
             }
             BufferType::UniformBuffer(params) => {
                 let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -131,28 +144,45 @@ impl Buffer {
                     // usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                     usage: params.usage,
                 });
+                let entries = [wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: params.shader_stages,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }];
                 let uniform_bind_group_layout =
                     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        entries: &[wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: params.shader_stages,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        }],
+                        entries: &entries,
                         label: Some("light_bind_group_layout"),
                     });
-                (uniform_bind_group_layout, uniform_buffer)
+                (
+                    uniform_bind_group_layout,
+                    uniform_buffer,
+                    BufferKey {
+                        layout: entries.to_vec(),
+                    },
+                )
             }
         };
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+            label: Some("Bind Group"),
+        });
 
         Self {
             buffer,
             bind_group_layout,
-            bind_group: None,
+            bind_group: Some(bind_group),
+            key,
         }
     }
 
@@ -200,7 +230,7 @@ impl Buffer {
     }
 
     pub fn new_layout(size: usize, device: &wgpu::Device, buffer_type: &BufferType) -> Self {
-        let (bind_group_layout, buffer) = match buffer_type {
+        let (bind_group_layout, buffer, key) = match buffer_type {
             BufferType::StorageBuffer(params) => {
                 let storage_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("output"),
@@ -208,24 +238,31 @@ impl Buffer {
                     usage: params.usage,
                     mapped_at_creation: false,
                 });
+                let entries = [wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: params.shader_stages,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage {
+                            read_only: params.read_only,
+                        },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }];
                 let storage_bind_group_layout =
                     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        entries: &[wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: params.shader_stages,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage {
-                                    read_only: params.read_only,
-                                },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        }],
+                        entries: &entries,
                         label: None,
                     });
 
-                (storage_bind_group_layout, storage_buffer)
+                (
+                    storage_bind_group_layout,
+                    storage_buffer,
+                    BufferKey {
+                        layout: entries.to_vec(),
+                    },
+                )
             }
             BufferType::UniformBuffer(params) => {
                 let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -234,28 +271,45 @@ impl Buffer {
                     usage: params.usage,
                     mapped_at_creation: false,
                 });
+                let entries = [wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: params.shader_stages,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }];
                 let uniform_bind_group_layout =
                     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        entries: &[wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: params.shader_stages,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        }],
+                        entries: &entries,
                         label: Some("light_bind_group_layout"),
                     });
-                (uniform_bind_group_layout, uniform_buffer)
+                (
+                    uniform_bind_group_layout,
+                    uniform_buffer,
+                    BufferKey {
+                        layout: entries.to_vec(),
+                    },
+                )
             }
         };
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+            label: Some("Bind Group"),
+        });
 
         Self {
             buffer,
             bind_group_layout,
-            bind_group: None,
+            bind_group: Some(bind_group),
+            key,
         }
     }
 }

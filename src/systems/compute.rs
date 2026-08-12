@@ -177,7 +177,7 @@ impl System for ComputeSystem {
         todo!()
     }
 
-    fn register(self, resources: &mut crate::core::resource::Resources, _device: &wgpu::Device) {
+    fn register(self, resources: &mut crate::core::resource::Resources) {
         let type_id = TypeId::of::<Self>();
         resources.resource_map.insert(type_id, Box::new(self));
     }
