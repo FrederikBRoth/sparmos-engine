@@ -259,6 +259,74 @@ impl Texture {
             bind_group,
         })
     }
+
+    pub fn from_color(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color: [f32; 3],
+        label: Option<&str>,
+    ) -> Result<Self> {
+        let rgba = [
+            (color[0].clamp(0.0, 1.0) * 255.0) as u8,
+            (color[1].clamp(0.0, 1.0) * 255.0) as u8,
+            (color[2].clamp(0.0, 1.0) * 255.0) as u8,
+            255,
+        ];
+
+        let size = wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        };
+
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            texture.as_image_copy(),
+            &rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            size,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 8,
+            ..Default::default()
+        });
+
+        let (bind_group_layout, bind_group) = create_bind_group_and_layout(device, &view, &sampler);
+
+        Ok(Self {
+            label: label.unwrap_or("solid-color-texture").to_string(),
+            texture,
+            view,
+            sampler,
+            bind_group_layout,
+            bind_group,
+        })
+    }
 }
 
 pub fn create_life_bind_group_and_layout(

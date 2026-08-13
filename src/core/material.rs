@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use log::warn;
 use slotmap::new_key_type;
 use wgpu::{BindGroupLayout, Device, PipelineLayout, RenderPipeline, ShaderModule, TextureFormat};
 
@@ -11,7 +12,7 @@ use crate::core::{
     texture::Texture,
 };
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct MaterialKey {
     pub buffers: Vec<BufferKey>,
     pub texture: Option<String>,
@@ -110,7 +111,9 @@ impl MaterialBuilder {
 
         let key = self.key(&vertex_layout, &instance_layout);
 
+        //if this material exists already, just return the existing handle
         if let Some(handle) = render_context.gpu_objects.get_material(&key) {
+            warn!("{:?} clashes with another implemented material", key);
             return handle;
         }
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();

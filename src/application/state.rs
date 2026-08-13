@@ -13,6 +13,7 @@ use winit::window::Window;
 use crate::application::gui::EguiRenderer;
 use crate::core::engine::{Arguments, Engine, RenderCommands};
 use crate::core::entities::World;
+use crate::core::geometry::Model;
 use crate::core::post_processing::PostProcessHandler;
 use crate::core::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext, Renderable};
 use crate::core::resource::Resources;
@@ -129,10 +130,14 @@ impl State {
                     wgpu::Limits {
                         max_texture_dimension_1d: 4096,
                         max_texture_dimension_2d: 4096,
-                        ..wgpu::Limits::downlevel_webgl2_defaults()
+                        max_bind_groups: 8,
+                        ..wgpu::Limits::default()
                     }
                 } else {
-                    wgpu::Limits::default()
+                    wgpu::Limits {
+                        max_bind_groups: 8,
+                        ..Default::default()
+                    }
                 },
                 ..Default::default()
             })
@@ -306,6 +311,17 @@ impl State {
                     .gpu_objects
                     .instance_controllers
                     .get_mut(renderable.instance_controller_handle)
+                    .unwrap()
+                    .update_single(&self.engine.render_context.queue);
+            }
+
+            let mut query = self.world.entities.query::<&Model>();
+            for renderable in query.iter() {
+                self.engine
+                    .render_context
+                    .gpu_objects
+                    .instance_controllers
+                    .get_mut(renderable.instance)
                     .unwrap()
                     .update_single(&self.engine.render_context.queue);
             }

@@ -48,7 +48,7 @@ impl Default for UniformParameters {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct BufferKey {
     layout: Vec<BindGroupLayoutEntry>,
 }

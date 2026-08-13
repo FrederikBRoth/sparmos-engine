@@ -8,11 +8,11 @@ use crate::{
     core::{
         engine::Engine,
         entities::World,
-        geometry::Mesh,
+        geometry::{Mesh, Model},
         instance::InstanceControllerTrait,
         material::{Material, MaterialKey},
         post_processing::PostProcessHandler,
-        texture::TextureSampleView,
+        texture::{Texture, TextureSampleView},
     },
 };
 
@@ -39,6 +39,12 @@ impl RenderContext {
     }
 }
 
+pub struct RenderableFuck {
+    pub material_handle: MaterialHandle,
+    pub mesh_handle: MeshHandle,
+    pub instance_controller_handle: InstanceControllerHandle,
+}
+
 pub struct Renderable {
     pub material_handle: MaterialHandle,
     pub mesh_handle: MeshHandle,
@@ -54,6 +60,37 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             bind_group_id += 1;
         }
 
+        for model in world.entities.query::<&Model>().iter() {
+            for (mesh, texture) in model.meshes.iter().cloned() {
+                let mesh = &scene.meshes[mesh];
+                let material = &scene.materials[model.material];
+                let instance_controller = &scene.instance_controllers[model.instance];
+                //binds all system bind groups
+                self.set_pipeline(&material.pipeline);
+                if let Some(texture) = &material.texture {
+                    self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
+                    bind_group_id += 1;
+                }
+
+                for buffers in &material.buffers {
+                    self.set_bind_group(bind_group_id, &buffers.1.bind_group, &[]);
+                }
+                self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                self.set_vertex_buffer(1, instance_controller.buffer().slice(..));
+                self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+
+                self.draw_indexed(
+                    0..mesh.index_count,
+                    0,
+                    0..instance_controller.count() as u32,
+                );
+            }
+        }
+        let mut bind_group_id = 0;
+        for (_name, bind_group) in world.resources.bind_groups.iter() {
+            self.set_bind_group(bind_group_id, bind_group, &[]);
+            bind_group_id += 1;
+        }
         for renderable in world.entities.query::<&Renderable>().iter() {
             let mesh = &scene.meshes[renderable.mesh_handle];
             let material = &scene.materials[renderable.material_handle];
@@ -89,13 +126,15 @@ pub trait DrawMesh {
 }
 new_key_type! { pub struct MeshHandle; }
 new_key_type! { pub struct MaterialHandle; }
+new_key_type! { pub struct TextureHandle; }
+
 new_key_type! { pub struct ComputeHandle; }
 new_key_type! { pub struct InstanceControllerHandle; }
 
 pub struct GpuObjects {
     pub instance_controllers: SlotMap<InstanceControllerHandle, Box<dyn InstanceControllerTrait>>,
     pub meshes: SlotMap<MeshHandle, Mesh>,
-
+    pub textures: SlotMap<TextureHandle, Texture>,
     pub materials: SlotMap<MaterialHandle, Material>,
     pub material_lookup: HashMap<MaterialKey, MaterialHandle>,
 }
@@ -118,6 +157,7 @@ impl GpuObjects {
             instance_controllers: SlotMap::with_key(),
             materials: SlotMap::with_key(),
             meshes: SlotMap::with_key(),
+            textures: SlotMap::with_key(),
             material_lookup: HashMap::new(),
         }
     }
