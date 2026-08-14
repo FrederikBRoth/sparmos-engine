@@ -156,7 +156,7 @@ impl AudioHandler {
     }
 
     pub fn init_sounds(state: &mut State, sounds: HashMap<AudioTrigger, Sound>) {
-        state.engine.audio_triggers = Some(sounds);
+        state.graphics.engine.audio_triggers = Some(sounds);
     }
 }
 pub struct Limiter {

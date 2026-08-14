@@ -6,15 +6,13 @@ use wgpu::Device;
 use crate::core::resource::{Resources, System};
 
 pub struct World {
-    pub device: Arc<Device>,
     pub entities: hecs::World,
     pub resources: Resources,
 }
 
 impl World {
-    pub fn new(device: Arc<Device>, entities: hecs::World, resources: Resources) -> Self {
+    pub fn new(entities: hecs::World, resources: Resources) -> Self {
         Self {
-            device,
             entities,
             resources,
         }

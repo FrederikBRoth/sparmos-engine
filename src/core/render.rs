@@ -12,7 +12,7 @@ use crate::{
         instance::InstanceControllerTrait,
         material::{Material, MaterialKey},
         post_processing::PostProcessHandler,
-        texture::{Texture, TextureSampleView},
+        texture::{self, Texture, TextureSampleView},
     },
 };
 
@@ -60,14 +60,19 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             bind_group_id += 1;
         }
 
+        let pre_id = bind_group_id;
+
         for model in world.entities.query::<&Model>().iter() {
+            let material = &scene.materials[model.material];
+            let instance_controller = &scene.instance_controllers[model.instance];
+
+            self.set_pipeline(&material.pipeline);
             for (mesh, texture) in model.meshes.iter().cloned() {
+                bind_group_id = pre_id;
+
                 let mesh = &scene.meshes[mesh];
-                let material = &scene.materials[model.material];
-                let instance_controller = &scene.instance_controllers[model.instance];
-                //binds all system bind groups
-                self.set_pipeline(&material.pipeline);
-                if let Some(texture) = &material.texture {
+                if let Some(texture_handle) = texture {
+                    let texture = &scene.textures[texture_handle.clone()];
                     self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
                     bind_group_id += 1;
                 }

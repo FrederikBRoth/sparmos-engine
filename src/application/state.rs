@@ -10,6 +10,7 @@ use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
+use crate::application::graphics::Graphics;
 use crate::application::gui::EguiRenderer;
 use crate::core::engine::{Arguments, Engine, RenderCommands};
 use crate::core::entities::World;
@@ -37,8 +38,7 @@ pub struct State {
     pub scroll_y: i64,
     pub egui_renderer: EguiRenderer,
     pub backend: DeviceBackend,
-    pub engine: Engine,
-    pub world: World,
+    pub graphics: Graphics,
 }
 pub trait Game {
     fn update(&mut self, dt: std::time::Duration, engine: &mut Engine, world: &mut World);
@@ -130,12 +130,11 @@ impl State {
                     wgpu::Limits {
                         max_texture_dimension_1d: 4096,
                         max_texture_dimension_2d: 4096,
-                        max_bind_groups: 8,
+                        max_bind_groups: 4,
                         ..wgpu::Limits::default()
                     }
                 } else {
                     wgpu::Limits {
-                        max_bind_groups: 8,
                         ..Default::default()
                     }
                 },
@@ -214,11 +213,13 @@ impl State {
             surface_configured: false,
             size,
             window,
-            engine,
+            graphics: Graphics {
+                world: World::new(hecs::World::new(), Resources::new()),
+                engine,
+            },
             scroll_y: 0,
             egui_renderer,
             backend,
-            world: World::new(Arc::clone(&device), hecs::World::new(), Resources::new()),
         }
     }
 
@@ -230,11 +231,11 @@ impl State {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             println!("{:?}", new_size);
-            self.engine.render_context.config.width = new_size.width;
-            self.engine.render_context.config.height = new_size.height;
+            self.graphics.engine.render_context.config.width = new_size.width;
+            self.graphics.engine.render_context.config.height = new_size.height;
             self.surface.configure(
-                &self.engine.render_context.device,
-                &self.engine.render_context.config,
+                &self.graphics.engine.render_context.device,
+                &self.graphics.engine.render_context.config,
             );
             self.surface_configured = true;
 
@@ -246,18 +247,20 @@ impl State {
                 (new_size.height as f32 * 1.1) as u32,
             );
 
-            self.engine.render_context.depth_texture = Texture::create_depth_texture(
-                &self.engine.render_context.device,
+            self.graphics.engine.render_context.depth_texture = Texture::create_depth_texture(
+                &self.graphics.engine.render_context.device,
                 &new_size,
                 "depth_texture_primitive",
             );
-            self.engine.render_context.overscan_depth_texture = Texture::create_depth_texture(
-                &self.engine.render_context.device,
-                &overscan_size,
-                "overscan_depth_texture",
-            );
+            self.graphics.engine.render_context.overscan_depth_texture =
+                Texture::create_depth_texture(
+                    &self.graphics.engine.render_context.device,
+                    &overscan_size,
+                    "overscan_depth_texture",
+                );
 
-            self.engine
+            self.graphics
+                .engine
                 .render_context
                 .post_processing
                 .resize(overscan_size);
@@ -268,31 +271,34 @@ impl State {
         }
     }
     pub fn input(&mut self, event: &WindowEvent) {
-        if let Some(audio_handler) = self.engine.audio_handler.as_mut() {
+        if let Some(audio_handler) = self.graphics.engine.audio_handler.as_mut() {
             audio_handler.update_from_keypress(event);
         }
     }
     //
     pub fn update(&mut self, dt: std::time::Duration) {
-        self.engine.frame_count += 1;
-        self.engine.time_acc += dt;
+        self.graphics.engine.frame_count += 1;
+        self.graphics.engine.time_acc += dt;
 
-        if self.engine.time_acc >= std::time::Duration::from_secs(1) {
-            let fps = self.engine.frame_count as f64 / self.engine.time_acc.as_secs_f64();
+        if self.graphics.engine.time_acc >= std::time::Duration::from_secs(1) {
+            let fps = self.graphics.engine.frame_count as f64
+                / self.graphics.engine.time_acc.as_secs_f64();
             println!("FPS: {:.2}", fps);
 
             // reset
-            self.engine.frame_count = 0;
-            self.engine.time_acc = std::time::Duration::ZERO;
+            self.graphics.engine.frame_count = 0;
+            self.graphics.engine.time_acc = std::time::Duration::ZERO;
         }
         {
             let mut query = self
+                .graphics
                 .world
                 .entities
                 .query::<(&Renderable, &mut AnimationHandler)>();
             for (renderable, ah) in query.iter() {
                 // ah.animate(dt.as_secs_f32());
                 let ic = self
+                    .graphics
                     .engine
                     .render_context
                     .gpu_objects
@@ -304,33 +310,36 @@ impl State {
             }
         }
         {
-            let mut query = self.world.entities.query::<&Renderable>();
+            let mut query = self.graphics.world.entities.query::<&Renderable>();
             for renderable in query.iter() {
-                self.engine
+                self.graphics
+                    .engine
                     .render_context
                     .gpu_objects
                     .instance_controllers
                     .get_mut(renderable.instance_controller_handle)
                     .unwrap()
-                    .update_single(&self.engine.render_context.queue);
+                    .update_single(&self.graphics.engine.render_context.queue);
             }
 
-            let mut query = self.world.entities.query::<&Model>();
+            let mut query = self.graphics.world.entities.query::<&Model>();
             for renderable in query.iter() {
-                self.engine
+                self.graphics
+                    .engine
                     .render_context
                     .gpu_objects
                     .instance_controllers
                     .get_mut(renderable.instance)
                     .unwrap()
-                    .update_single(&self.engine.render_context.queue);
+                    .update_single(&self.graphics.engine.render_context.queue);
             }
         }
-        self.world
+        self.graphics
+            .world
             .query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
                 |resources, (camera, camera_animator)| {
                     let camera_system = resources.get_system_mut::<CameraSystem>().unwrap();
-                    camera_system.update_camera(dt, &self.engine.render_context, camera);
+                    camera_system.update_camera(dt, &self.graphics.engine.render_context, camera);
                     camera_animator.update(dt.as_secs_f32(), camera);
                 },
             );
@@ -349,12 +358,16 @@ impl State {
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
 
-                let mut encoder = self.engine.render_context.device.create_command_encoder(
-                    &wgpu::CommandEncoderDescriptor {
+                let mut encoder = self
+                    .graphics
+                    .engine
+                    .render_context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Render Encoder"),
-                    },
-                );
+                    });
                 if self
+                    .graphics
                     .engine
                     .render_context
                     .post_processing
@@ -363,6 +376,7 @@ impl State {
                     > 0
                 {
                     let mut post_processes = self
+                        .graphics
                         .engine
                         .render_context
                         .post_processing
@@ -387,6 +401,7 @@ impl State {
                                 depth_stencil_attachment: Some(
                                     wgpu::RenderPassDepthStencilAttachment {
                                         view: &self
+                                            .graphics
                                             .engine
                                             .render_context
                                             .overscan_depth_texture
@@ -402,7 +417,11 @@ impl State {
                                 timestamp_writes: None,
                                 ..Default::default()
                             });
-                        render_pass.draw_scene(&self.backend, &self.engine, &self.world);
+                        render_pass.draw_scene(
+                            &self.backend,
+                            &self.graphics.engine,
+                            &self.graphics.world,
+                        );
                     }
 
                     while let Some((_, post_process)) = post_processes.next() {
@@ -490,7 +509,12 @@ impl State {
                                 })],
                                 depth_stencil_attachment: Some(
                                     wgpu::RenderPassDepthStencilAttachment {
-                                        view: &self.engine.render_context.depth_texture.view,
+                                        view: &self
+                                            .graphics
+                                            .engine
+                                            .render_context
+                                            .depth_texture
+                                            .view,
                                         depth_ops: Some(wgpu::Operations {
                                             load: wgpu::LoadOp::Clear(1.0),
                                             store: wgpu::StoreOp::Store,
@@ -503,7 +527,11 @@ impl State {
                                 ..Default::default()
                             });
 
-                        render_pass.draw_scene(&self.backend, &self.engine, &self.world);
+                        render_pass.draw_scene(
+                            &self.backend,
+                            &self.graphics.engine,
+                            &self.graphics.world,
+                        );
                     }
                 }
 
@@ -513,18 +541,18 @@ impl State {
 
                     let screen_descriptor = ScreenDescriptor {
                         size_in_pixels: [
-                            self.engine.render_context.config.width,
-                            self.engine.render_context.config.height,
+                            self.graphics.engine.render_context.config.width,
+                            self.graphics.engine.render_context.config.height,
                         ],
                         pixels_per_point: self.window.scale_factor() as f32,
                     };
 
                     let full_output = self.egui_renderer.start_gui(&self.window, |ui| {
-                        game.gui_setup(dt, &mut self.engine, ui);
+                        game.gui_setup(dt, &mut self.graphics.engine, ui);
                     });
                     self.egui_renderer.end_frame_and_draw(
-                        &self.engine.render_context.device,
-                        &self.engine.render_context.queue,
+                        &self.graphics.engine.render_context.device,
+                        &self.graphics.engine.render_context.queue,
                         &mut encoder,
                         &self.window,
                         &view,
@@ -534,8 +562,19 @@ impl State {
                 }
 
                 {
-                    if let Some(computes) = self.world.resources.get_system_mut::<ComputeSystem>() {
-                        for compute in self.world.entities.query::<&ComputeHandle>().iter() {
+                    if let Some(computes) = self
+                        .graphics
+                        .world
+                        .resources
+                        .get_system_mut::<ComputeSystem>()
+                    {
+                        for compute in self
+                            .graphics
+                            .world
+                            .entities
+                            .query::<&ComputeHandle>()
+                            .iter()
+                        {
                             let compute_pipeline = computes.get(*compute).unwrap();
                             if compute_pipeline.pending {
                                 continue;
@@ -573,20 +612,27 @@ impl State {
                     }
                 }
 
-                self.engine
+                self.graphics
+                    .engine
                     .render_context
                     .queue
                     .submit(std::iter::once(encoder.finish()));
 
-                let mut commands = std::mem::take(&mut self.engine.render_commands);
+                let mut commands = std::mem::take(&mut self.graphics.engine.render_commands);
                 for command in commands.drain(..) {
                     match command {
                         RenderCommands::ChangeShader(material_handle, shader) => {
-                            self.engine.change_shader_inner(&material_handle, &shader);
+                            self.graphics
+                                .engine
+                                .change_shader_inner(&material_handle, &shader);
                         }
                     }
                 }
-                self.engine.render_context.queue.present(surface_texture);
+                self.graphics
+                    .engine
+                    .render_context
+                    .queue
+                    .present(surface_texture);
             }
             CurrentSurfaceTexture::Suboptimal(_) => (),
             CurrentSurfaceTexture::Timeout => (),

@@ -10,7 +10,7 @@ use crate::core::{
 #[derive(Clone)]
 pub struct InstanceController<T>
 where
-    T: InstanceToRaw + bytemuck::Pod + Send + Sync + 'static,
+    T: RawInstance + bytemuck::Pod + Send + Sync + 'static,
 {
     pub instances: Arc<RwLock<Vec<Instance>>>,
     pub pending: Arc<Mutex<Vec<T>>>,
@@ -21,7 +21,7 @@ where
 }
 impl<T> InstanceController<T>
 where
-    T: InstanceToRaw + bytemuck::Pod + Send + Sync + 'static,
+    T: RawInstance + bytemuck::Pod + Send + Sync + 'static,
 {
     pub fn new(instances: Vec<Instance>, rc: &mut RenderContext) -> InstanceControllerHandle {
         let mut raw = Vec::with_capacity(instances.len());
@@ -61,7 +61,7 @@ pub trait InstanceControllerTrait {
 }
 impl<T> InstanceControllerTrait for InstanceController<T>
 where
-    T: InstanceToRaw + bytemuck::Pod + Send + Sync,
+    T: RawInstance + bytemuck::Pod + Send + Sync,
 {
     fn update_single(&self, queue: &wgpu::Queue) {
         let pending = Arc::clone(&self.pending);
@@ -210,7 +210,7 @@ impl Instance {
         }
     }
 }
-pub trait InstanceToRaw {
+pub trait RawInstance {
     fn layout() -> VertexBufferLayoutOwned;
     fn to_raw(instance: &Instance) -> Self;
 }
@@ -224,7 +224,7 @@ pub struct GpuInstance {
     _pad: f32, // alignment (important!)
 }
 
-impl InstanceToRaw for GpuInstance {
+impl RawInstance for GpuInstance {
     fn layout() -> VertexBufferLayoutOwned {
         use std::mem;
 
@@ -274,7 +274,7 @@ pub struct InstanceRaw {
     pub normal: [[f32; 3]; 3],
 }
 
-impl InstanceToRaw for InstanceRaw {
+impl RawInstance for InstanceRaw {
     fn layout() -> VertexBufferLayoutOwned {
         use std::mem;
         VertexBufferLayoutOwned {

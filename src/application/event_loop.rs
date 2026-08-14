@@ -132,7 +132,7 @@ where
                 game_loop.setup(&mut state);
                 //INFO: to initiate sound in WASM scenarios, you must call this function from a
                 //user input in the browser. Otherwise it wont launch
-                state.engine.init_sound(0.6, 1.2);
+                state.graphics.engine.init_sound(1.6, 1.2);
 
                 self.state = Some(state);
                 self.game_loop = Some(game_loop);
@@ -161,7 +161,7 @@ where
                             let size = state.window().inner_size();
 
                             state.resize(size);
-                            game.resize(&mut state.engine, &mut state.world);
+                            game.resize(&mut state.graphics.engine, &mut state.graphics.world);
 
                             state.window().request_redraw();
 
@@ -176,8 +176,11 @@ where
 
                     EngineEvent::ComputeResult(package) => {
                         let state = self.state.as_mut().unwrap();
-                        if let Some(computes) =
-                            state.world.resources.get_system_mut::<ComputeSystem>()
+                        if let Some(computes) = state
+                            .graphics
+                            .world
+                            .resources
+                            .get_system_mut::<ComputeSystem>()
                         {
                             let compute = computes.get(package.handle).unwrap();
                             compute.read_result(package.data);
@@ -237,15 +240,27 @@ where
 
                 state.render(dt, game);
 
-                if let Some(computes) = state.world.resources.get_system_mut::<ComputeSystem>() {
+                if let Some(computes) = state
+                    .graphics
+                    .world
+                    .resources
+                    .get_system_mut::<ComputeSystem>()
+                {
                     state
+                        .graphics
                         .engine
                         .render_context
                         .device
                         .poll(wgpu::PollType::Poll)
                         .ok();
 
-                    for compute_handle in state.world.entities.query::<&ComputeHandle>().iter() {
+                    for compute_handle in state
+                        .graphics
+                        .world
+                        .entities
+                        .query::<&ComputeHandle>()
+                        .iter()
+                    {
                         let compute = computes.get(*compute_handle).unwrap();
 
                         if !compute.pending {
@@ -261,17 +276,22 @@ where
                 state.update(dt);
                 // println!("test");
 
-                game.update(dt, &mut state.engine, &mut state.world);
+                game.update(dt, &mut state.graphics.engine, &mut state.graphics.world);
             }
 
             WindowEvent::Resized(size) => {
                 state.resize(size);
-                game.resize(&mut state.engine, &mut state.world);
+                game.resize(&mut state.graphics.engine, &mut state.graphics.world);
             }
 
             _ => {
                 state.input(&event);
-                game.process_event(&event, &state.size, &mut state.engine, &mut state.world);
+                game.process_event(
+                    &event,
+                    &state.size,
+                    &mut state.graphics.engine,
+                    &mut state.graphics.world,
+                );
             }
         }
     }
