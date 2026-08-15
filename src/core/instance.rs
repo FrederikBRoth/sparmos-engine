@@ -1,91 +1,54 @@
-use std::sync::{Arc, Mutex, RwLock, atomic::AtomicUsize};
+use std::marker::PhantomData;
 
-use cgmath::Rotation3;
+use cgmath::{InnerSpace, Rotation3, Vector2, Vector3, Zero};
 
-use crate::core::{
-    geometry::VertexBufferLayoutOwned,
-    render::{InstanceControllerHandle, RenderContext},
+use crate::{
+    application::graphics::Graphics,
+    core::{geometry::VertexBufferLayoutOwned, render::InstanceControllerHandle},
 };
 
 #[derive(Clone)]
 pub struct InstanceController<T>
 where
-    T: RawInstance + bytemuck::Pod + Send + Sync + 'static,
+    T: RawInstance,
 {
-    pub instances: Arc<RwLock<Vec<Instance>>>,
-    pub pending: Arc<Mutex<Vec<T>>>,
+    pub pending: Vec<T>,
+    pub instances: Vec<Instance>,
     pub offset: usize,
-    pub atomic_usize: Arc<AtomicUsize>,
+    pub size: usize,
     pub buffer_layout: VertexBufferLayoutOwned,
     pub instance_buffer: wgpu::Buffer,
-}
-impl<T> InstanceController<T>
-where
-    T: RawInstance + bytemuck::Pod + Send + Sync + 'static,
-{
-    pub fn new(instances: Vec<Instance>, rc: &mut RenderContext) -> InstanceControllerHandle {
-        let mut raw = Vec::with_capacity(instances.len());
-
-        raw.extend(instances.iter().filter(|i| i.should_render).map(T::to_raw));
-
-        let len = raw.len();
-
-        let instance_buffer = rc.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Instance Buffer"),
-            size: (instances.len() * std::mem::size_of::<T>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let ic = InstanceController {
-            instances: Arc::new(RwLock::new(instances)),
-            pending: Arc::new(Mutex::new(raw)),
-            offset: 0,
-            atomic_usize: Arc::new(AtomicUsize::new(len)),
-            buffer_layout: T::layout(),
-            instance_buffer,
-        };
-        rc.gpu_objects.instance_controllers.insert(Box::new(ic))
-    }
+    phantom: PhantomData<T>,
 }
 pub trait InstanceControllerTrait {
-    fn update(&self, queue: &wgpu::Queue);
-    fn update_single(&self, queue: &wgpu::Queue);
+    fn update_single(&mut self, queue: &wgpu::Queue);
 
     fn buffer(&self) -> &wgpu::Buffer;
     fn layout(&self) -> &VertexBufferLayoutOwned;
 
     fn count(&self) -> usize;
-    fn instances(&self) -> std::sync::RwLockReadGuard<'_, Vec<Instance>>;
-    fn instances_mut(&self) -> std::sync::RwLockWriteGuard<'_, Vec<Instance>>;
+    fn instances(&self) -> &Vec<Instance>;
+    fn instances_mut(&mut self) -> &mut Vec<Instance>;
 }
 impl<T> InstanceControllerTrait for InstanceController<T>
 where
-    T: RawInstance + bytemuck::Pod + Send + Sync,
+    T: RawInstance,
 {
-    fn update_single(&self, queue: &wgpu::Queue) {
-        let pending = Arc::clone(&self.pending);
-        let instances = Arc::clone(&self.instances);
-        let count_clone = Arc::clone(&self.atomic_usize);
+    fn update_single(&mut self, queue: &wgpu::Queue) {
+        self.pending.clear();
 
-        let mut pending = pending.lock().unwrap();
-
-        pending.clear();
-        pending.extend(
-            instances
-                .read()
-                .unwrap()
+        self.pending.extend(
+            self.instances
                 .iter()
                 .filter(|i| i.should_render)
                 .map(T::to_raw),
         );
 
-        count_clone.store(pending.len(), std::sync::atomic::Ordering::Relaxed);
-
         let chunk_size = 10_000;
         let stride = std::mem::size_of::<T>();
 
-        for (i, chunk) in pending.chunks(chunk_size).enumerate() {
+        self.size = self.pending.len();
+        for (i, chunk) in self.pending.chunks(chunk_size).enumerate() {
             queue.write_buffer(
                 &self.instance_buffer,
                 (i * chunk_size * stride) as u64,
@@ -94,62 +57,62 @@ where
         }
     }
 
-    fn update(&self, queue: &wgpu::Queue) {
-        let pending = Arc::clone(&self.pending);
-        let instances = Arc::clone(&self.instances);
-        let count_clone = Arc::clone(&self.atomic_usize);
-
-        #[cfg(not(target_arch = "wasm32"))]
-        std::thread::spawn(move || {
-            let mut pending = pending.lock().unwrap();
-
-            pending.clear();
-            pending.extend(
-                instances
-                    .read()
-                    .unwrap()
-                    .iter()
-                    .filter(|i| i.should_render)
-                    .map(T::to_raw),
-            );
-
-            count_clone.store(pending.len(), std::sync::atomic::Ordering::Relaxed);
-        });
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            use wasm_bindgen_futures::spawn_local;
-
-            spawn_local(async move {
-                let mut pending = pending.lock().unwrap();
-
-                pending.clear();
-                pending.extend(
-                    instances
-                        .read()
-                        .unwrap()
-                        .iter()
-                        .filter(|i| i.should_render)
-                        .map(T::to_raw),
-                );
-
-                count_clone.store(pending.len(), std::sync::atomic::Ordering::Relaxed);
-            });
-        }
-
-        let pending = self.pending.lock().unwrap();
-
-        let chunk_size = 10_000;
-        let stride = std::mem::size_of::<T>();
-
-        for (i, chunk) in pending.chunks(chunk_size).enumerate() {
-            queue.write_buffer(
-                &self.instance_buffer,
-                (i * chunk_size * stride) as u64,
-                bytemuck::cast_slice(chunk),
-            );
-        }
-    }
+    // fn update(&self, queue: &wgpu::Queue) {
+    //     let pending = Arc::clone(&self.pending);
+    //     let instances = Arc::clone(&self.instances);
+    //     let count_clone = Arc::clone(&self.size);
+    //
+    //     #[cfg(not(target_arch = "wasm32"))]
+    //     std::thread::spawn(move || {
+    //         let mut pending = pending.lock().unwrap();
+    //
+    //         pending.clear();
+    //         pending.extend(
+    //             instances
+    //                 .read()
+    //                 .unwrap()
+    //                 .iter()
+    //                 .filter(|i| i.should_render)
+    //                 .map(T::to_raw),
+    //         );
+    //
+    //         count_clone.store(pending.len(), std::sync::atomic::Ordering::Relaxed);
+    //     });
+    //
+    //     #[cfg(target_arch = "wasm32")]
+    //     {
+    //         use wasm_bindgen_futures::spawn_local;
+    //
+    //         spawn_local(async move {
+    //             let mut pending = pending.lock().unwrap();
+    //
+    //             pending.clear();
+    //             pending.extend(
+    //                 instances
+    //                     .read()
+    //                     .unwrap()
+    //                     .iter()
+    //                     .filter(|i| i.should_render)
+    //                     .map(T::to_raw),
+    //             );
+    //
+    //             count_clone.store(pending.len(), std::sync::atomic::Ordering::Relaxed);
+    //         });
+    //     }
+    //
+    //     let pending = self.pending.lock().unwrap();
+    //
+    //     let chunk_size = 10_000;
+    //     let stride = std::mem::size_of::<T>();
+    //
+    //     for (i, chunk) in pending.chunks(chunk_size).enumerate() {
+    //         queue.write_buffer(
+    //             &self.instance_buffer,
+    //             (i * chunk_size * stride) as u64,
+    //             bytemuck::cast_slice(chunk),
+    //         );
+    //     }
+    // }
     fn buffer(&self) -> &wgpu::Buffer {
         &self.instance_buffer
     }
@@ -159,15 +122,15 @@ where
     }
 
     fn count(&self) -> usize {
-        self.atomic_usize.load(std::sync::atomic::Ordering::Relaxed)
+        self.size
     }
 
-    fn instances(&self) -> std::sync::RwLockReadGuard<'_, Vec<Instance>> {
-        self.instances.read().unwrap()
+    fn instances(&self) -> &Vec<Instance> {
+        &self.instances
     }
 
-    fn instances_mut(&self) -> std::sync::RwLockWriteGuard<'_, Vec<Instance>> {
-        self.instances.write().unwrap()
+    fn instances_mut(&mut self) -> &mut Vec<Instance> {
+        &mut self.instances
     }
 }
 
@@ -210,10 +173,11 @@ impl Instance {
         }
     }
 }
-pub trait RawInstance {
+pub trait RawInstance: bytemuck::Pod + bytemuck::Zeroable {
     fn layout() -> VertexBufferLayoutOwned;
     fn to_raw(instance: &Instance) -> Self;
 }
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuInstance {
@@ -354,5 +318,211 @@ impl RawInstance for InstanceRaw {
             color: instance.color.into(),
             normal: cgmath::Matrix3::from(instance.rotation).into(),
         }
+    }
+}
+
+pub enum InstanceTemplate {
+    GridX(Vector2<f32>),
+    GridY(Vector2<f32>),
+    GridZ(Vector2<f32>),
+    Cube(Vector3<f32>),
+    LineX(u32),
+    LineY(u32),
+    LineZ(u32),
+    Circle(f32),
+    Single,
+}
+
+impl InstanceTemplate {
+    pub fn get_instances(&self, origin: Vector3<f32>) -> Vec<Instance> {
+        let positions: Vec<Vector3<f32>> = match self {
+            InstanceTemplate::GridX(size) => {
+                let y = size.x as u32;
+                let z = size.y as u32;
+
+                (0..y * z)
+                    .map(|n| {
+                        let y_pos = n % y;
+                        let z_pos = n / y;
+
+                        origin + Vector3::new(0.0, y_pos as f32, z_pos as f32)
+                    })
+                    .collect()
+            }
+
+            InstanceTemplate::GridY(size) => {
+                let x = size.x as u32;
+                let z = size.y as u32;
+
+                (0..x * z)
+                    .map(|n| {
+                        let x_pos = n % x;
+                        let z_pos = n / x;
+
+                        origin + Vector3::new(x_pos as f32, 0.0, z_pos as f32)
+                    })
+                    .collect()
+            }
+
+            InstanceTemplate::GridZ(size) => {
+                let x = size.x as u32;
+                let y = size.y as u32;
+
+                (0..x * y)
+                    .map(|n| {
+                        let x_pos = n % x;
+                        let y_pos = n / x;
+
+                        origin + Vector3::new(x_pos as f32, y_pos as f32, 0.0)
+                    })
+                    .collect()
+            }
+
+            InstanceTemplate::Cube(size) => {
+                let x = size.x as u32;
+                let y = size.y as u32;
+                let z = size.z as u32;
+
+                (0..x * y * z)
+                    .map(|n| {
+                        let x_pos = n % x;
+                        let z_pos = (n / x) % z;
+                        let y_pos = n / (x * z);
+
+                        origin + Vector3::new(x_pos as f32, y_pos as f32, z_pos as f32)
+                    })
+                    .collect()
+            }
+
+            InstanceTemplate::LineX(size) => (0..*size)
+                .map(|x| origin + Vector3::new(x as f32, 0.0, 0.0))
+                .collect(),
+
+            InstanceTemplate::LineY(size) => (0..*size)
+                .map(|y| origin + Vector3::new(0.0, y as f32, 0.0))
+                .collect(),
+
+            InstanceTemplate::LineZ(size) => (0..*size)
+                .map(|z| origin + Vector3::new(0.0, 0.0, z as f32))
+                .collect(),
+
+            InstanceTemplate::Circle(radius) => {
+                let r = radius.ceil() as i32;
+
+                (-r..=r)
+                    .flat_map(|x| {
+                        (-r..=r).filter_map(move |z| {
+                            let distance_squared = (x * x + z * z) as f32;
+
+                            if distance_squared <= radius * radius {
+                                Some(origin + Vector3::new(x as f32, 0.0, z as f32))
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .collect()
+            }
+            InstanceTemplate::Single => [origin].to_vec(),
+        };
+
+        positions
+            .into_iter()
+            .enumerate()
+            .map(|(index, position)| {
+                let local_position = position - origin;
+
+                let rotation = if local_position.is_zero() {
+                    cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+                } else {
+                    cgmath::Quaternion::from_axis_angle(
+                        local_position.normalize(),
+                        cgmath::Deg(0.0),
+                    )
+                };
+
+                let color = Vector3::new(1.0, 1.0, 1.0);
+                let size = Vector3::new(1.0, 1.0, 1.0);
+
+                Instance {
+                    index: index as u32,
+                    position,
+                    rotation,
+                    scale: 1.0,
+                    should_render: true,
+                    color,
+                    size,
+                    bounding: position + size,
+                }
+            })
+            .collect()
+    }
+}
+
+pub struct InstanceBuilder<'a, T: RawInstance> {
+    pub(crate) gfx: &'a mut Graphics,
+    pub(crate) origin: Vector3<f32>,
+    pub(crate) template: Option<InstanceTemplate>,
+    pub(crate) phantom_data: PhantomData<T>,
+    pub(crate) instances: Vec<Instance>,
+}
+
+impl<'a, T: RawInstance> InstanceBuilder<'a, T> {
+    pub fn from_instances(mut self, instances: Vec<Instance>) -> Self {
+        self.instances = instances.to_vec();
+        self
+    }
+    pub fn template(mut self, template: InstanceTemplate) -> Self {
+        self.template = Some(template);
+        self
+    }
+
+    pub fn origin(mut self, origin: Vector3<f32>) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    pub fn build(self) -> InstanceControllerHandle {
+        let instances = if let Some(template) = self.template {
+            template.get_instances(self.origin)
+        } else {
+            if !self.instances.is_empty() {
+                self.instances
+            } else {
+                InstanceTemplate::Single.get_instances(self.origin)
+            }
+        };
+        let mut raw = Vec::with_capacity(instances.len());
+
+        raw.extend(instances.iter().filter(|i| i.should_render).map(T::to_raw));
+
+        let len = raw.len();
+
+        let instance_buffer =
+            self.gfx
+                .engine
+                .render_context
+                .device
+                .create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Instance Buffer"),
+                    size: (instances.len() * std::mem::size_of::<T>()) as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+        let ic = InstanceController::<T> {
+            pending: Vec::with_capacity(instances.len()),
+            instances: instances,
+            offset: 0,
+            size: len,
+            buffer_layout: T::layout(),
+            instance_buffer,
+            phantom: Default::default(),
+        };
+        self.gfx
+            .engine
+            .render_context
+            .gpu_objects
+            .instance_controllers
+            .insert(Box::new(ic))
     }
 }
