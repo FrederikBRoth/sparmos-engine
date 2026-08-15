@@ -186,7 +186,6 @@ where
                             compute.read_result(package.data);
                             compute.temp_buffer.unmap();
                             compute.pending = false;
-                            // compute.read_result(package.data);
                             // println!("tawd");
                         }
                     }

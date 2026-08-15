@@ -1,16 +1,12 @@
 use ahash::AHashMap;
 use std::{
-    collections::HashMap,
     io::{BufReader, Cursor},
     mem,
 };
 use wgpu::util::DeviceExt;
 
 use crate::core::{
-    instance::GpuInstance,
-    material::{Material, MaterialBuilder},
     render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext, TextureHandle},
-    resource::Resources,
     texture::Texture,
 };
 

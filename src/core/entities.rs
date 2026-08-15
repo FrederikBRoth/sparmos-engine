@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use hecs::{DynamicBundle, Entity, Query, QueryBorrow};
-use wgpu::Device;
 
 use crate::core::resource::{Resources, System};
 

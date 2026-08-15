@@ -7,10 +7,8 @@ use crate::{
     application::graphics::Graphics,
     core::{
         buffer::{Buffer, BufferKey},
-        geometry::{Vertex, VertexBufferLayoutOwned, VertexLayoutKey},
-        instance::RawInstance,
-        render::{MaterialHandle, RenderContext},
-        resource::Resources,
+        geometry::{VertexBufferLayoutOwned, VertexLayoutKey},
+        render::MaterialHandle,
         texture::Texture,
     },
 };
@@ -166,8 +164,8 @@ impl<'a> MaterialBuilder<'a> {
             texture: self.texture.clone(),
             //TODO FIX
             buffers: self.buffers.clone(),
-            ic_buffer_layout: self.vertex_layout,
-            mesh_buffer_layout: self.instance_layout,
+            ic_buffer_layout: self.instance_layout,
+            mesh_buffer_layout: self.vertex_layout,
         };
         let handle = self
             .graphics

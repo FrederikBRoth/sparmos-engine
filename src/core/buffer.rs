@@ -186,12 +186,13 @@ impl Buffer {
         }
     }
 
-    pub fn new<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+    pub fn new(
+        object_size: usize,
         size: usize,
         device: &wgpu::Device,
         buffer_type: BufferType,
     ) -> Self {
-        let output_size = mem::size_of::<T>() * size;
+        let output_size = object_size * size;
 
         let mut buffer = Buffer::new_layout(output_size, device, &buffer_type);
 
