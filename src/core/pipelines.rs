@@ -10,7 +10,7 @@ use crate::{
     core::{
         buffer::{Buffer, BufferKey},
         geometry::{VertexBufferLayoutOwned, VertexLayoutKey},
-        render::{ComputeHandle, MaterialHandle},
+        render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle},
         texture::Texture,
     },
     systems::compute::ComputeSystem,
@@ -300,8 +300,8 @@ fn create_pipeline(
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less), // standard depth test
-                stencil: wgpu::StencilState::default(),           // no stencil operations
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             // depth_stencil: None,
@@ -310,11 +310,201 @@ fn create_pipeline(
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            // If the pipeline will be used with a multiview render pass, this
-            // indicates how many array layers the attachments will have.
             multiview_mask: None,
-            // Useful for optimizing shader compilation on Android
             cache: None,
         })
     }
+}
+
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+pub struct ComputeRenderingKey {
+    pub compute: ComputeHandle,
+    pub shader: String,
+}
+
+#[derive(Clone)]
+pub struct ComputeRendering {
+    pub key: ComputeRenderingKey,
+
+    pub pipeline_layout: PipelineLayout,
+    pub pipeline: RenderPipeline,
+
+    pub compute_bind_group: BindGroup,
+}
+
+pub struct ComputeRenderingBuilder<'a> {
+    pub(crate) graphics: &'a mut Graphics,
+    pub(crate) compute: ComputeHandle,
+    pub(crate) shader: String,
+}
+
+impl<'a> ComputeRenderingBuilder<'a> {
+    pub fn new(graphics: &'a mut Graphics, compute: ComputeHandle) -> Self {
+        Self {
+            graphics,
+            compute,
+            shader: String::new(),
+        }
+    }
+
+    pub fn shader(mut self, shader: &str) -> Self {
+        self.shader = shader.to_string();
+        self
+    }
+
+    fn key(&self) -> ComputeRenderingKey {
+        ComputeRenderingKey {
+            compute: self.compute,
+            shader: self.shader.clone(),
+        }
+    }
+
+    pub fn build(self) -> ComputeRenderingHandle {
+        let device = &self.graphics.engine.render_context.device;
+
+        let shader = self
+            .graphics
+            .engine
+            .render_context
+            .shaders
+            .get(&self.shader)
+            .unwrap();
+
+        let compute = self
+            .graphics
+            .world
+            .resources
+            .get_system_mut::<ComputeSystem>()
+            .unwrap()
+            .get(self.compute)
+            .unwrap();
+
+        let (bind_group_layout, bind_group) = compute.render_bind_groups.clone();
+
+        let key = self.key();
+
+        // Reuse existing ComputeRendering
+        if let Some(handle) = self
+            .graphics
+            .engine
+            .render_context
+            .gpu_objects
+            .get_compute_rendering(&key)
+        {
+            warn!("{:?} clashes with another compute rendering", key);
+
+            return handle;
+        }
+
+        let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
+
+        for system in self.graphics.world.resources.get_bind_group_layouts() {
+            bind_group_layouts.push(system);
+        }
+
+        bind_group_layouts.push(Some(&bind_group_layout));
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Compute Rendering Pipeline Layout"),
+            bind_group_layouts: &bind_group_layouts,
+            ..Default::default()
+        });
+
+        let pipeline = create_compute_rendering_pipeline(
+            self.graphics.engine.render_context.config.format,
+            device,
+            &pipeline_layout,
+            shader,
+        );
+
+        let compute_rendering = ComputeRendering {
+            key: key.clone(),
+            pipeline_layout,
+            pipeline,
+            compute_bind_group: bind_group,
+        };
+
+        let handle = self
+            .graphics
+            .engine
+            .render_context
+            .gpu_objects
+            .compute_renderings
+            .insert(compute_rendering);
+
+        self.graphics
+            .engine
+            .render_context
+            .gpu_objects
+            .compute_rendering_lookup
+            .insert(key, handle);
+
+        handle
+    }
+}
+
+fn create_compute_rendering_pipeline(
+    format: TextureFormat,
+    device: &Device,
+    pipeline_layout: &PipelineLayout,
+    shader: &ShaderModule,
+) -> RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Compute Rendering Pipeline"),
+
+        layout: Some(pipeline_layout),
+
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+
+            // No vertex buffers when creating a compute renderer
+            buffers: &[],
+
+            compilation_options: Default::default(),
+        },
+
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+
+            compilation_options: Default::default(),
+        }),
+
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+
+            // Particles don't need back-face culling.
+            cull_mode: None,
+
+            polygon_mode: wgpu::PolygonMode::Fill,
+            unclipped_depth: false,
+            conservative: false,
+        },
+
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: Texture::DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+
+        multisample: wgpu::MultisampleState {
+            count: 1,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+
+        multiview_mask: None,
+        cache: None,
+    })
 }

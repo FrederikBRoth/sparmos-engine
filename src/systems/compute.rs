@@ -38,6 +38,7 @@ pub struct ComputeBuilder<'a> {
     pub(crate) input_buffers: Vec<Buffer>,
     pub(crate) shader: String,
     pub(crate) readback: ReadbackState,
+    pub(crate) initial_data: Option<Buffer>,
 }
 
 impl<'a> ComputeBuilder<'a> {
@@ -49,7 +50,6 @@ impl<'a> ComputeBuilder<'a> {
         mut self,
         data: &[T],
     ) -> Self {
-        assert_eq!(data.len(), self.size);
         let buffer = Buffer::new_init(
             data,
             &self.gfx.get_device(),
@@ -68,23 +68,41 @@ impl<'a> ComputeBuilder<'a> {
         self
     }
 
+    pub fn initial_data<T: bytemuck::Pod>(mut self, data: &[T]) -> Self {
+        self.initial_data = Some(Buffer::new_init(
+            data,
+            &self.gfx.get_device(),
+            BufferType::StorageBuffer(StorageParameters {
+                shader_stages: ShaderStages::COMPUTE,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                read_only: false,
+                ..Default::default()
+            }),
+        ));
+
+        self
+    }
     pub fn readback(mut self) -> Self {
         self.readback = ReadbackState::Available;
         self
     }
 
     pub fn build(self) -> ComputeHandle {
-        let output_buffer = Buffer::new(
-            self.output_object_size,
-            self.size,
-            self.gfx.get_device(),
-            BufferType::StorageBuffer(StorageParameters {
-                shader_stages: ShaderStages::COMPUTE,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-                init: false,
-                read_only: false,
-            }),
-        );
+        let output_buffer = if let Some(buffer) = self.initial_data {
+            buffer
+        } else {
+            Buffer::new(
+                self.output_object_size,
+                self.size,
+                self.gfx.get_device(),
+                BufferType::StorageBuffer(StorageParameters {
+                    shader_stages: ShaderStages::COMPUTE,
+                    usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                    init: false,
+                    read_only: false,
+                }),
+            )
+        };
 
         //Preallocate output data for fast writing
         let output_size = self.output_object_size * self.size;

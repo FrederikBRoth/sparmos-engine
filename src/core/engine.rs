@@ -8,7 +8,7 @@ use crate::{
     core::{
         geometry::Mesh,
         instance::InstanceControllerTrait,
-        material::Material,
+        pipelines::Material,
         render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
     },
 };

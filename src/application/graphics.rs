@@ -10,8 +10,8 @@ use crate::{
         entities::World,
         geometry::Vertex,
         instance::{InstanceBuilder, RawInstance},
-        material::MaterialBuilder,
-        render::RenderContext,
+        pipelines::{ComputeRenderingBuilder, MaterialBuilder},
+        render::{ComputeHandle, RenderContext},
     },
     systems::compute::{ComputeBuilder, ReadbackState},
 };
@@ -80,6 +80,11 @@ impl Graphics {
             input_buffers: vec![],
             shader: String::new(),
             readback: ReadbackState::NoReadback,
+            initial_data: None,
         }
+    }
+
+    pub fn compute_rendering(&mut self, compute: ComputeHandle) -> ComputeRenderingBuilder<'_> {
+        ComputeRenderingBuilder::new(self, compute)
     }
 }

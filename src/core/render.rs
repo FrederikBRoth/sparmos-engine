@@ -10,7 +10,7 @@ use crate::{
         entities::World,
         geometry::{Mesh, Model},
         instance::InstanceControllerTrait,
-        material::{Material, MaterialKey},
+        pipelines::{ComputeRendering, ComputeRenderingKey, Material, MaterialKey},
         post_processing::PostProcessHandler,
         texture::{self, Texture, TextureSampleView},
     },
@@ -39,10 +39,10 @@ impl RenderContext {
     }
 }
 
-pub struct RenderableFuck {
-    pub material_handle: MaterialHandle,
-    pub mesh_handle: MeshHandle,
-    pub instance_controller_handle: InstanceControllerHandle,
+pub struct ComputeRenderable {
+    pub rendering_handle: ComputeRenderingHandle,
+    pub vertex_count: u32,
+    pub instance_count: u32,
 }
 
 pub struct Renderable {
@@ -131,6 +131,24 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                 0..instance_controller.count() as u32,
             );
         }
+
+        let mut bind_group_id = 0;
+        for (_name, bind_group) in world.resources.bind_groups.iter() {
+            self.set_bind_group(bind_group_id, bind_group, &[]);
+            bind_group_id += 1;
+        }
+        for renderable in world.entities.query::<&ComputeRenderable>().iter() {
+            let rendering = &scene.compute_renderings[renderable.rendering_handle];
+
+            self.set_pipeline(&rendering.pipeline);
+
+            // Bind engine/system bind groups
+
+            // Bind compute output buffer
+            self.set_bind_group(bind_group_id, &rendering.compute_bind_group, &[]);
+
+            self.draw(0..renderable.vertex_count, 0..renderable.instance_count);
+        }
     }
 }
 
@@ -144,6 +162,9 @@ new_key_type! { pub struct TextureHandle; }
 
 new_key_type! { pub struct ComputeHandle; }
 new_key_type! { pub struct InstanceControllerHandle; }
+new_key_type! {
+    pub struct ComputeRenderingHandle;
+}
 
 pub struct GpuObjects {
     pub instance_controllers: SlotMap<InstanceControllerHandle, Box<dyn InstanceControllerTrait>>,
@@ -151,6 +172,9 @@ pub struct GpuObjects {
     pub textures: SlotMap<TextureHandle, Texture>,
     pub materials: SlotMap<MaterialHandle, Material>,
     pub material_lookup: HashMap<MaterialKey, MaterialHandle>,
+    pub compute_renderings: SlotMap<ComputeRenderingHandle, ComputeRendering>,
+
+    pub compute_rendering_lookup: HashMap<ComputeRenderingKey, ComputeRenderingHandle>,
 }
 
 impl GpuObjects {
@@ -173,10 +197,19 @@ impl GpuObjects {
             meshes: SlotMap::with_key(),
             textures: SlotMap::with_key(),
             material_lookup: HashMap::new(),
+
+            compute_renderings: SlotMap::with_key(),
+            compute_rendering_lookup: HashMap::new(),
         }
     }
 
     pub fn get_material(&mut self, key: &MaterialKey) -> Option<MaterialHandle> {
-        self.material_lookup.get(key).cloned()
+        self.material_lookup.get(key).copied()
+    }
+    pub fn get_compute_rendering(
+        &mut self,
+        key: &ComputeRenderingKey,
+    ) -> Option<ComputeRenderingHandle> {
+        self.compute_rendering_lookup.get(key).copied()
     }
 }
