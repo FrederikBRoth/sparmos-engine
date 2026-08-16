@@ -21,7 +21,7 @@ use crate::core::resource::Resources;
 use crate::core::texture::Texture;
 use crate::systems::animation::AnimationHandler;
 use crate::systems::camera::{Camera, CameraAnimator, CameraSystem};
-use crate::systems::compute::ComputeSystem;
+use crate::systems::compute::{ComputeSystem, ReadbackState};
 
 pub enum DeviceBackend {
     WebGL,
@@ -164,7 +164,7 @@ impl State {
             width: size.width,
             height: size.height,
 
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -203,6 +203,16 @@ impl State {
             audio_handler: None,
             audio_triggers: None,
         };
+        let mut gfx = Graphics {
+            world: World::new(hecs::World::new(), Resources::new()),
+            engine,
+        };
+
+        //Setup basic systems
+        //Compute
+        let cs = ComputeSystem::new();
+
+        gfx.world.add_system(cs);
 
         // post_processing.new_effect(size, surface_format, Effect::ChromaticTwo);
 
@@ -213,10 +223,7 @@ impl State {
             surface_configured: false,
             size,
             window,
-            graphics: Graphics {
-                world: World::new(hecs::World::new(), Resources::new()),
-                engine,
-            },
+            graphics: gfx,
             scroll_y: 0,
             egui_renderer,
             backend,
@@ -231,11 +238,11 @@ impl State {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             println!("{:?}", new_size);
-            self.graphics.engine.render_context.config.width = new_size.width;
-            self.graphics.engine.render_context.config.height = new_size.height;
+            self.graphics.get_render_context_mut().config.width = new_size.width;
+            self.graphics.get_render_context_mut().config.height = new_size.height;
             self.surface.configure(
-                &self.graphics.engine.render_context.device,
-                &self.graphics.engine.render_context.config,
+                self.graphics.get_device(),
+                &self.graphics.get_render_context().config,
             );
             self.surface_configured = true;
 
@@ -247,17 +254,18 @@ impl State {
                 (new_size.height as f32 * 1.1) as u32,
             );
 
-            self.graphics.engine.render_context.depth_texture = Texture::create_depth_texture(
-                &self.graphics.engine.render_context.device,
+            self.graphics.get_render_context_mut().depth_texture = Texture::create_depth_texture(
+                self.graphics.get_device(),
                 &new_size,
                 "depth_texture_primitive",
             );
-            self.graphics.engine.render_context.overscan_depth_texture =
-                Texture::create_depth_texture(
-                    &self.graphics.engine.render_context.device,
-                    &overscan_size,
-                    "overscan_depth_texture",
-                );
+            self.graphics
+                .get_render_context_mut()
+                .overscan_depth_texture = Texture::create_depth_texture(
+                self.graphics.get_device(),
+                &overscan_size,
+                "overscan_depth_texture",
+            );
 
             self.graphics
                 .engine
@@ -350,8 +358,6 @@ impl State {
             return;
         }
 
-        self.window.request_redraw();
-
         match self.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(surface_texture) => {
                 let view = surface_texture
@@ -366,6 +372,59 @@ impl State {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Render Encoder"),
                     });
+                {
+                    if let Some(computes) = self
+                        .graphics
+                        .world
+                        .resources
+                        .get_system_mut::<ComputeSystem>()
+                    {
+                        for compute in self
+                            .graphics
+                            .world
+                            .entities
+                            .query::<&ComputeHandle>()
+                            .iter()
+                        {
+                            let compute_pipeline = computes.get(*compute).unwrap();
+                            if compute_pipeline.readback_status == ReadbackState::Pending {
+                                continue;
+                            };
+                            let num_dispatches = compute_pipeline.length.div_ceil(64) as u32;
+
+                            {
+                                let mut pass = encoder.begin_compute_pass(&Default::default());
+
+                                pass.set_pipeline(&compute_pipeline.pipeline);
+                                let mut bind_group_index = 0;
+                                for input_buffer in compute_pipeline.input_buffers.iter() {
+                                    pass.set_bind_group(
+                                        bind_group_index,
+                                        input_buffer.bind_group.as_ref().unwrap(),
+                                        &[],
+                                    );
+                                    bind_group_index += 1;
+                                }
+                                pass.set_bind_group(
+                                    bind_group_index,
+                                    compute_pipeline.output_buffer.bind_group.as_ref().unwrap(),
+                                    &[],
+                                );
+                                pass.dispatch_workgroups(num_dispatches, 1, 1);
+                            }
+                            if let Some(temp_buffer) = compute_pipeline.temp_buffer.as_ref() {
+                                encoder.copy_buffer_to_buffer(
+                                    &compute_pipeline.output_buffer.buffer,
+                                    0,
+                                    &temp_buffer,
+                                    0,
+                                    compute_pipeline.output_buffer.buffer.size(),
+                                );
+                            }
+                        }
+                    }
+                }
+
                 if self
                     .graphics
                     .engine
@@ -559,57 +618,6 @@ impl State {
                         screen_descriptor,
                         full_output,
                     );
-                }
-
-                {
-                    if let Some(computes) = self
-                        .graphics
-                        .world
-                        .resources
-                        .get_system_mut::<ComputeSystem>()
-                    {
-                        for compute in self
-                            .graphics
-                            .world
-                            .entities
-                            .query::<&ComputeHandle>()
-                            .iter()
-                        {
-                            let compute_pipeline = computes.get(*compute).unwrap();
-                            if compute_pipeline.pending {
-                                continue;
-                            }
-                            let num_dispatches = compute_pipeline.length.div_ceil(64) as u32;
-
-                            {
-                                let mut pass = encoder.begin_compute_pass(&Default::default());
-
-                                pass.set_pipeline(&compute_pipeline.pipeline);
-                                let mut bind_group_index = 0;
-                                for input_buffer in compute_pipeline.input_buffers.iter() {
-                                    pass.set_bind_group(
-                                        bind_group_index,
-                                        input_buffer.bind_group.as_ref().unwrap(),
-                                        &[],
-                                    );
-                                    bind_group_index += 1;
-                                }
-                                pass.set_bind_group(
-                                    bind_group_index,
-                                    compute_pipeline.output_buffer.bind_group.as_ref().unwrap(),
-                                    &[],
-                                );
-                                pass.dispatch_workgroups(num_dispatches, 1, 1);
-                            }
-                            encoder.copy_buffer_to_buffer(
-                                &compute_pipeline.output_buffer.buffer,
-                                0,
-                                &compute_pipeline.temp_buffer,
-                                0,
-                                compute_pipeline.output_buffer.buffer.size(),
-                            );
-                        }
-                    }
                 }
 
                 self.graphics

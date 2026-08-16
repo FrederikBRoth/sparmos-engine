@@ -1,7 +1,7 @@
 use std::{any::TypeId, mem};
 
 use slotmap::SlotMap;
-use wgpu::{BindGroupLayout, BufferUsages, ComputePipeline, ShaderStages};
+use wgpu::{BindGroup, BindGroupLayout, BufferUsages, ComputePipeline, ShaderStages};
 
 use crate::{
     application::graphics::Graphics,
@@ -12,13 +12,21 @@ use crate::{
     },
 };
 
+#[derive(Clone, PartialEq)]
+pub enum ReadbackState {
+    NoReadback,
+    Pending,
+    Available,
+}
 #[derive(Clone)]
 pub struct Compute {
-    pub pending: bool,
+    pub readback_status: ReadbackState,
     pub pipeline: ComputePipeline,
     pub input_buffers: Vec<Buffer>,
     pub output_buffer: Buffer,
-    pub temp_buffer: wgpu::Buffer,
+    pub render_bind_groups: (BindGroupLayout, BindGroup),
+
+    pub temp_buffer: Option<wgpu::Buffer>,
     pub length: u32,
     pub data: Vec<u8>,
 }
@@ -29,6 +37,7 @@ pub struct ComputeBuilder<'a> {
     pub(crate) size: usize,
     pub(crate) input_buffers: Vec<Buffer>,
     pub(crate) shader: String,
+    pub(crate) readback: ReadbackState,
 }
 
 impl<'a> ComputeBuilder<'a> {
@@ -59,7 +68,12 @@ impl<'a> ComputeBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> Compute {
+    pub fn readback(mut self) -> Self {
+        self.readback = ReadbackState::Available;
+        self
+    }
+
+    pub fn build(self) -> ComputeHandle {
         let output_buffer = Buffer::new(
             self.output_object_size,
             self.size,
@@ -75,14 +89,21 @@ impl<'a> ComputeBuilder<'a> {
         //Preallocate output data for fast writing
         let output_size = self.output_object_size * self.size;
         let data = vec![0u8; output_size];
-        Compute::new(
+        let compute = Compute::new(
             self.gfx.get_render_context_mut(),
             self.input_buffers,
             output_buffer,
             &self.shader,
             self.size,
             data,
-        )
+            self.readback,
+        );
+        self.gfx
+            .world
+            .resources
+            .get_system_mut::<ComputeSystem>()
+            .unwrap()
+            .add(compute)
     }
 }
 
@@ -98,6 +119,7 @@ impl Compute {
         shader: &str,
         length: usize,
         data: Vec<u8>,
+        readback_state: ReadbackState,
     ) -> Compute {
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
         for buffer in input_buffers.iter() {
@@ -105,15 +127,47 @@ impl Compute {
         }
         bind_group_layouts.push(Some(&output_buffer.bind_group_layout));
 
-        let temp_buffer = render_context
+        let storage_bind_group_layout =
+            render_context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                    label: None,
+                });
+
+        let bind_group = render_context
             .device
-            .create_buffer(&wgpu::BufferDescriptor {
-                label: Some("temp"),
-                size: output_buffer.buffer.size(),
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &storage_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: output_buffer.buffer.as_entire_binding(),
+                }],
+                label: Some("Bind Group"),
             });
 
+        let temp_buffer = match readback_state {
+            ReadbackState::NoReadback => None,
+            ReadbackState::Available | ReadbackState::Pending => Some(
+                render_context
+                    .device
+                    .create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("temp"),
+                        size: output_buffer.buffer.size(),
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    }),
+            ),
+        };
         let shader = render_context.shaders.get(shader).unwrap();
         let render_pipeline_layout =
             render_context
@@ -136,14 +190,16 @@ impl Compute {
                     cache: Default::default(),
                 });
         let compute = Compute {
-            pending: false,
+            readback_status: readback_state,
             pipeline,
             input_buffers: input_buffers,
             output_buffer: output_buffer,
             temp_buffer,
             length: length as u32,
             data,
+            render_bind_groups: (storage_bind_group_layout, bind_group),
         };
+
         compute
     }
     pub fn read_result(&mut self, data: Result<wgpu::BufferView, wgpu::MapRangeError>) {

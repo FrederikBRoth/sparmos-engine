@@ -1,16 +1,19 @@
 use indexmap::IndexMap;
 use log::warn;
 use slotmap::new_key_type;
-use wgpu::{BindGroupLayout, Device, PipelineLayout, RenderPipeline, ShaderModule, TextureFormat};
+use wgpu::{
+    BindGroup, BindGroupLayout, Device, PipelineLayout, RenderPipeline, ShaderModule, TextureFormat,
+};
 
 use crate::{
     application::graphics::Graphics,
     core::{
         buffer::{Buffer, BufferKey},
         geometry::{VertexBufferLayoutOwned, VertexLayoutKey},
-        render::MaterialHandle,
+        render::{ComputeHandle, MaterialHandle},
         texture::Texture,
     },
+    systems::compute::ComputeSystem,
 };
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
@@ -31,6 +34,7 @@ pub struct Material {
     pub buffers: IndexMap<u32, Buffer>,
     pub ic_buffer_layout: VertexBufferLayoutOwned,
     pub mesh_buffer_layout: VertexBufferLayoutOwned,
+    pub compute_bind_group: Option<BindGroup>,
 }
 
 impl Material {
@@ -56,6 +60,7 @@ pub struct MaterialBuilder<'a> {
     pub(crate) shader: String,
     pub(crate) vertex_layout: VertexBufferLayoutOwned,
     pub(crate) instance_layout: VertexBufferLayoutOwned,
+    pub(crate) compute_layout: Option<(BindGroupLayout, BindGroup)>,
 }
 
 impl<'a> MaterialBuilder<'a> {
@@ -85,6 +90,21 @@ impl<'a> MaterialBuilder<'a> {
 
     pub fn buffer(mut self, handle: u32, buffer: Buffer) -> Self {
         self.buffers.insert(handle, buffer);
+        self
+    }
+
+    pub fn compute_buffer(mut self, handle: ComputeHandle) -> Self {
+        self.compute_layout = Some(
+            self.graphics
+                .world
+                .resources
+                .get_system_mut::<ComputeSystem>()
+                .unwrap()
+                .get(handle)
+                .unwrap()
+                .render_bind_groups
+                .clone(),
+        );
         self
     }
 
@@ -134,6 +154,9 @@ impl<'a> MaterialBuilder<'a> {
         for buffer in self.buffers.values() {
             bind_group_layouts.push(Some(&buffer.bind_group_layout));
         }
+        if let Some(compute_layout) = &self.compute_layout {
+            bind_group_layouts.push(Some(&compute_layout.0));
+        }
 
         //First check is if a texture was passed to the material. If it was, do a textured pipeline, if
         //not go primitive
@@ -157,6 +180,7 @@ impl<'a> MaterialBuilder<'a> {
             &self.vertex_layout,
             &self.instance_layout,
         );
+        let compute_bind = self.compute_layout.map(|c| c.1);
         let material = Material {
             key: key.clone(),
             pipeline,
@@ -166,6 +190,7 @@ impl<'a> MaterialBuilder<'a> {
             buffers: self.buffers.clone(),
             ic_buffer_layout: self.instance_layout,
             mesh_buffer_layout: self.vertex_layout,
+            compute_bind_group: compute_bind,
         };
         let handle = self
             .graphics

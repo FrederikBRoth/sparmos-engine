@@ -79,6 +79,11 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
 
                 for buffers in &material.buffers {
                     self.set_bind_group(bind_group_id, &buffers.1.bind_group, &[]);
+                    bind_group_id += 1;
+                }
+
+                if let Some(compute_layout) = &material.compute_bind_group {
+                    self.set_bind_group(bind_group_id, compute_layout, &[]);
                 }
                 self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 self.set_vertex_buffer(1, instance_controller.buffer().slice(..));
@@ -110,6 +115,10 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
 
             for buffers in &material.buffers {
                 self.set_bind_group(bind_group_id, &buffers.1.bind_group, &[]);
+                bind_group_id += 1;
+            }
+            if let Some(compute_layout) = &material.compute_bind_group {
+                self.set_bind_group(bind_group_id, compute_layout, &[]);
             }
 
             self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));

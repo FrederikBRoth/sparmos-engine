@@ -10,7 +10,7 @@ use winit::{
 use crate::{
     application::state::{Game, State},
     core::render::ComputeHandle,
-    systems::compute::ComputeSystem,
+    systems::compute::{ComputeSystem, ReadbackState},
 };
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -38,6 +38,7 @@ where
     pub hooks: Box<dyn AppLifecycle<U>>,
     pub game_loop: Option<Box<dyn Game>>,
     pub state: Option<State>,
+    next_frame: web_time::Instant,
     proxy: Option<EventLoopProxy<UserEvent<U>>>,
     last_time: web_time::Instant,
 
@@ -64,6 +65,7 @@ where
             game_loop: Some(Box::new(game_loop)),
             proxy: Some(event_loop.create_proxy()),
             last_time: web_time::Instant::now(),
+            next_frame: web_time::Instant::now(),
             #[cfg(target_arch = "wasm32")]
             pending: std::rc::Rc::new(std::cell::RefCell::new(None)),
         }
@@ -184,8 +186,8 @@ where
                         {
                             let compute = computes.get(package.handle).unwrap();
                             compute.read_result(package.data);
-                            compute.temp_buffer.unmap();
-                            compute.pending = false;
+                            compute.temp_buffer.as_ref().unwrap().unmap();
+                            compute.readback_status = ReadbackState::Available;
                             // println!("tawd");
                         }
                     }
@@ -245,14 +247,6 @@ where
                     .resources
                     .get_system_mut::<ComputeSystem>()
                 {
-                    state
-                        .graphics
-                        .engine
-                        .render_context
-                        .device
-                        .poll(wgpu::PollType::Poll)
-                        .ok();
-
                     for compute_handle in state
                         .graphics
                         .world
@@ -261,14 +255,16 @@ where
                         .iter()
                     {
                         let compute = computes.get(*compute_handle).unwrap();
-
-                        if !compute.pending {
-                            compute.pending = true;
-                            readback(
-                                &compute.temp_buffer,
-                                *compute_handle,
-                                &self.proxy.clone().unwrap(),
-                            );
+                        match compute.readback_status {
+                            ReadbackState::NoReadback | ReadbackState::Pending => continue,
+                            ReadbackState::Available => {
+                                compute.readback_status = ReadbackState::Pending;
+                                readback(
+                                    &compute.temp_buffer.as_ref().unwrap(),
+                                    *compute_handle,
+                                    &self.proxy.clone().unwrap(),
+                                );
+                            }
                         }
                     }
                 }
@@ -304,6 +300,38 @@ where
         if let Some(state) = self.state.as_mut() {
             self.hooks.on_device_event(event, state);
         }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let now = web_time::Instant::now();
+
+        // Poll wgpu independently of the render rate.
+        if let Some(state) = self.state.as_ref() {
+            state
+                .graphics
+                .engine
+                .render_context
+                .device
+                .poll(wgpu::PollType::Poll)
+                .ok();
+        }
+
+        // Render deadline
+        if now >= self.next_frame {
+            self.next_frame += std::time::Duration::from_secs_f64(1.0 / 144.0);
+
+            if let Some(state) = self.state.as_ref() {
+                state.window().request_redraw();
+            }
+        }
+
+        // Wake up frequently enough to service GPU callbacks,
+        // but don't busy-spin.
+        let poll_deadline = now + std::time::Duration::from_millis(1);
+
+        let next_wakeup = poll_deadline.min(self.next_frame);
+
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(next_wakeup));
     }
 }
 

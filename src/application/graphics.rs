@@ -13,7 +13,7 @@ use crate::{
         material::MaterialBuilder,
         render::RenderContext,
     },
-    systems::compute::ComputeBuilder,
+    systems::compute::{ComputeBuilder, ReadbackState},
 };
 
 pub struct Graphics {
@@ -55,6 +55,7 @@ impl Graphics {
             shader: String::new(),
             vertex_layout: V::layout(),
             instance_layout: I::layout(),
+            compute_layout: None,
         }
     }
 
@@ -78,6 +79,7 @@ impl Graphics {
             size: 0,
             input_buffers: vec![],
             shader: String::new(),
+            readback: ReadbackState::NoReadback,
         }
     }
 }
