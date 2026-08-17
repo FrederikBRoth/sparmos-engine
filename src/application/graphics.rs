@@ -55,7 +55,7 @@ impl Graphics {
             shader: String::new(),
             vertex_layout: V::layout(),
             instance_layout: I::layout(),
-            compute_layout: None,
+            compute_render_buffer: None,
         }
     }
 

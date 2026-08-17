@@ -41,8 +41,7 @@ impl RenderContext {
 
 pub struct ComputeRenderable {
     pub rendering_handle: ComputeRenderingHandle,
-    pub vertex_count: u32,
-    pub instance_count: u32,
+    pub mesh_handle: MeshHandle,
 }
 
 pub struct Renderable {
@@ -139,15 +138,23 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
         }
         for renderable in world.entities.query::<&ComputeRenderable>().iter() {
             let rendering = &scene.compute_renderings[renderable.rendering_handle];
-
+            let mesh = &scene.meshes[renderable.mesh_handle];
             self.set_pipeline(&rendering.pipeline);
 
             // Bind engine/system bind groups
+            for buffer in &rendering.input_buffers {
+                self.set_bind_group(bind_group_id, &buffer.bind_group, &[]);
+                bind_group_id += 1;
+            }
 
-            // Bind compute output buffer
             self.set_bind_group(bind_group_id, &rendering.compute_bind_group, &[]);
+            self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
-            self.draw(0..renderable.vertex_count, 0..renderable.instance_count);
+            self.draw_indexed(0..mesh.index_count, 0, 0..rendering.length);
+            // Bind compute output buffer
+
+            // self.draw(0..renderable.vertex_count, 0..renderable.instance_count);
         }
     }
 }

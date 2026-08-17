@@ -589,7 +589,7 @@ impl System for CameraSystem {
     fn register(self, resources: &mut crate::core::resource::Resources) {
         let type_id = TypeId::of::<Self>();
 
-        let bind_group = self.camera_buffer.bind_group.as_ref().unwrap().clone();
+        let bind_group = self.camera_buffer.bind_group.clone();
         let bind_group_layout = self.get_bind_group_layout().clone();
         resources.resource_map.insert(type_id, Box::new(self));
         resources

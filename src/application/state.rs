@@ -400,14 +400,14 @@ impl State {
                                 for input_buffer in compute_pipeline.input_buffers.iter() {
                                     pass.set_bind_group(
                                         bind_group_index,
-                                        input_buffer.bind_group.as_ref().unwrap(),
+                                        Some(&input_buffer.bind_group),
                                         &[],
                                     );
                                     bind_group_index += 1;
                                 }
                                 pass.set_bind_group(
                                     bind_group_index,
-                                    compute_pipeline.output_buffer.bind_group.as_ref().unwrap(),
+                                    Some(&compute_pipeline.output_buffer.bind_group),
                                     &[],
                                 );
                                 pass.dispatch_workgroups(num_dispatches, 1, 1);

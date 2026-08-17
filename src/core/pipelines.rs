@@ -8,8 +8,9 @@ use wgpu::{
 use crate::{
     application::graphics::Graphics,
     core::{
-        buffer::{Buffer, BufferKey},
-        geometry::{VertexBufferLayoutOwned, VertexLayoutKey},
+        buffer::{Buffer, BufferKey, BufferType, UniformParameters},
+        geometry::{Vertex, VertexBufferLayoutOwned, VertexLayoutKey},
+        instance::RawInstance,
         render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle},
         texture::Texture,
     },
@@ -60,7 +61,7 @@ pub struct MaterialBuilder<'a> {
     pub(crate) shader: String,
     pub(crate) vertex_layout: VertexBufferLayoutOwned,
     pub(crate) instance_layout: VertexBufferLayoutOwned,
-    pub(crate) compute_layout: Option<(BindGroupLayout, BindGroup)>,
+    pub(crate) compute_render_buffer: Option<Buffer>,
 }
 
 impl<'a> MaterialBuilder<'a> {
@@ -94,7 +95,7 @@ impl<'a> MaterialBuilder<'a> {
     }
 
     pub fn compute_buffer(mut self, handle: ComputeHandle) -> Self {
-        self.compute_layout = Some(
+        self.compute_render_buffer = Some(
             self.graphics
                 .world
                 .resources
@@ -102,7 +103,7 @@ impl<'a> MaterialBuilder<'a> {
                 .unwrap()
                 .get(handle)
                 .unwrap()
-                .render_bind_groups
+                .render_buffer
                 .clone(),
         );
         self
@@ -154,8 +155,8 @@ impl<'a> MaterialBuilder<'a> {
         for buffer in self.buffers.values() {
             bind_group_layouts.push(Some(&buffer.bind_group_layout));
         }
-        if let Some(compute_layout) = &self.compute_layout {
-            bind_group_layouts.push(Some(&compute_layout.0));
+        if let Some(compute_layout) = &self.compute_render_buffer {
+            bind_group_layouts.push(Some(&compute_layout.bind_group_layout));
         }
 
         //First check is if a texture was passed to the material. If it was, do a textured pipeline, if
@@ -180,7 +181,7 @@ impl<'a> MaterialBuilder<'a> {
             &self.vertex_layout,
             &self.instance_layout,
         );
-        let compute_bind = self.compute_layout.map(|c| c.1);
+        let compute_bind = self.compute_render_buffer.map(|c| c.bind_group);
         let material = Material {
             key: key.clone(),
             pipeline,
@@ -328,14 +329,17 @@ pub struct ComputeRendering {
 
     pub pipeline_layout: PipelineLayout,
     pub pipeline: RenderPipeline,
-
+    pub length: u32,
     pub compute_bind_group: BindGroup,
+    pub input_buffers: Vec<Buffer>,
 }
 
 pub struct ComputeRenderingBuilder<'a> {
     pub(crate) graphics: &'a mut Graphics,
     pub(crate) compute: ComputeHandle,
+    pub(crate) input_buffers: Vec<Buffer>,
     pub(crate) shader: String,
+    pub(crate) mesh_layout: Option<VertexBufferLayoutOwned>,
 }
 
 impl<'a> ComputeRenderingBuilder<'a> {
@@ -344,6 +348,8 @@ impl<'a> ComputeRenderingBuilder<'a> {
             graphics,
             compute,
             shader: String::new(),
+            mesh_layout: None,
+            input_buffers: vec![],
         }
     }
 
@@ -352,11 +358,29 @@ impl<'a> ComputeRenderingBuilder<'a> {
         self
     }
 
+    pub fn input_buffer<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        mut self,
+        data: &[T],
+    ) -> Self {
+        let buffer = Buffer::new_init(
+            data,
+            self.graphics.get_device(),
+            BufferType::UniformBuffer(UniformParameters::default()),
+        );
+        self.input_buffers.push(buffer);
+        self
+    }
+
     fn key(&self) -> ComputeRenderingKey {
         ComputeRenderingKey {
             compute: self.compute,
             shader: self.shader.clone(),
         }
+    }
+
+    pub fn mesh<T: Vertex>(mut self) -> Self {
+        self.mesh_layout = Some(T::layout());
+        self
     }
 
     pub fn build(self) -> ComputeRenderingHandle {
@@ -379,8 +403,8 @@ impl<'a> ComputeRenderingBuilder<'a> {
             .get(self.compute)
             .unwrap();
 
-        let (bind_group_layout, bind_group) = compute.render_bind_groups.clone();
-
+        let render_buffer = compute.render_buffer.clone();
+        let length = compute.length.clone();
         let key = self.key();
 
         // Reuse existing ComputeRendering
@@ -402,7 +426,11 @@ impl<'a> ComputeRenderingBuilder<'a> {
             bind_group_layouts.push(system);
         }
 
-        bind_group_layouts.push(Some(&bind_group_layout));
+        for buffer in &self.input_buffers {
+            bind_group_layouts.push(Some(&buffer.bind_group_layout));
+        }
+
+        bind_group_layouts.push(Some(&render_buffer.bind_group_layout));
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Compute Rendering Pipeline Layout"),
@@ -410,18 +438,15 @@ impl<'a> ComputeRenderingBuilder<'a> {
             ..Default::default()
         });
 
-        let pipeline = create_compute_rendering_pipeline(
-            self.graphics.engine.render_context.config.format,
-            device,
-            &pipeline_layout,
-            shader,
-        );
+        let pipeline = self.create_compute_rendering_pipeline(device, &pipeline_layout, shader);
 
         let compute_rendering = ComputeRendering {
             key: key.clone(),
+            length,
             pipeline_layout,
             pipeline,
-            compute_bind_group: bind_group,
+            compute_bind_group: render_buffer.bind_group,
+            input_buffers: self.input_buffers,
         };
 
         let handle = self
@@ -441,70 +466,74 @@ impl<'a> ComputeRenderingBuilder<'a> {
 
         handle
     }
-}
 
-fn create_compute_rendering_pipeline(
-    format: TextureFormat,
-    device: &Device,
-    pipeline_layout: &PipelineLayout,
-    shader: &ShaderModule,
-) -> RenderPipeline {
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("Compute Rendering Pipeline"),
+    fn create_compute_rendering_pipeline(
+        &self,
+        device: &Device,
+        pipeline_layout: &PipelineLayout,
+        shader: &ShaderModule,
+    ) -> RenderPipeline {
+        let mut buffers: Vec<Option<wgpu::VertexBufferLayout>> = vec![];
 
-        layout: Some(pipeline_layout),
+        if let Some(mesh) = &self.mesh_layout {
+            buffers.push(mesh.to_wgpu());
+        }
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Compute Rendering Pipeline"),
 
-        vertex: wgpu::VertexState {
-            module: shader,
-            entry_point: Some("vs_main"),
+            layout: Some(pipeline_layout),
 
-            // No vertex buffers when creating a compute renderer
-            buffers: &[],
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
 
-            compilation_options: Default::default(),
-        },
+                buffers: &buffers,
 
-        fragment: Some(wgpu::FragmentState {
-            module: shader,
-            entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+            },
 
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_main"),
 
-            compilation_options: Default::default(),
-        }),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.graphics.engine.render_context.config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
 
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
+                compilation_options: Default::default(),
+            }),
 
-            // Particles don't need back-face culling.
-            cull_mode: None,
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
 
-            polygon_mode: wgpu::PolygonMode::Fill,
-            unclipped_depth: false,
-            conservative: false,
-        },
+                // Particles don't need back-face culling.
+                cull_mode: None,
 
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: Texture::DEPTH_FORMAT,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Less),
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
 
-        multisample: wgpu::MultisampleState {
-            count: 1,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Texture::DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
 
-        multiview_mask: None,
-        cache: None,
-    })
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+
+            multiview_mask: None,
+            cache: None,
+        })
+    }
 }

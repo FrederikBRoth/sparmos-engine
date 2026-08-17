@@ -6,7 +6,7 @@ use wgpu::{BindGroup, BindGroupLayout, BufferUsages, ComputePipeline, ShaderStag
 use crate::{
     application::graphics::Graphics,
     core::{
-        buffer::{Buffer, BufferType, StorageParameters},
+        buffer::{Buffer, BufferType, StorageParameters, UniformParameters},
         render::{ComputeHandle, RenderContext},
         resource::System,
     },
@@ -24,7 +24,7 @@ pub struct Compute {
     pub pipeline: ComputePipeline,
     pub input_buffers: Vec<Buffer>,
     pub output_buffer: Buffer,
-    pub render_bind_groups: (BindGroupLayout, BindGroup),
+    pub render_buffer: Buffer,
 
     pub temp_buffer: Option<wgpu::Buffer>,
     pub length: u32,
@@ -53,9 +53,8 @@ impl<'a> ComputeBuilder<'a> {
         let buffer = Buffer::new_init(
             data,
             &self.gfx.get_device(),
-            BufferType::StorageBuffer(StorageParameters {
+            BufferType::UniformBuffer(UniformParameters {
                 shader_stages: ShaderStages::COMPUTE,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
                 ..Default::default()
             }),
         );
@@ -145,34 +144,15 @@ impl Compute {
         }
         bind_group_layouts.push(Some(&output_buffer.bind_group_layout));
 
-        let storage_bind_group_layout =
-            render_context
-                .device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    entries: &[wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }],
-                    label: None,
-                });
-
-        let bind_group = render_context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &storage_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: output_buffer.buffer.as_entire_binding(),
-                }],
-                label: Some("Bind Group"),
-            });
-
+        let render_buffer = Buffer::from_existing(
+            &output_buffer,
+            &render_context.device,
+            BufferType::StorageBuffer(StorageParameters {
+                read_only: true,
+                shader_stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                ..Default::default()
+            }),
+        );
         let temp_buffer = match readback_state {
             ReadbackState::NoReadback => None,
             ReadbackState::Available | ReadbackState::Pending => Some(
@@ -215,7 +195,7 @@ impl Compute {
             temp_buffer,
             length: length as u32,
             data,
-            render_bind_groups: (storage_bind_group_layout, bind_group),
+            render_buffer,
         };
 
         compute

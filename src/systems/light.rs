@@ -64,10 +64,10 @@ pub struct LightSystem {
 impl LightSystem {
     pub fn init(lights: &[Light], device: &wgpu::Device) -> Self {
         let light_block = Light::to_raw_list(lights);
-        let storage_buffer = Buffer::new_layout_init(
+        let storage_buffer = Buffer::new_init(
             &[light_block],
             device,
-            &BufferType::UniformBuffer(UniformParameters::default()),
+            BufferType::UniformBuffer(UniformParameters::default()),
         );
         Self { storage_buffer }
     }
@@ -88,7 +88,7 @@ impl System for LightSystem {
         let type_id = TypeId::of::<Self>();
 
         let bind_group_layout = self.get_bind_group_layout().clone();
-        let bind_group = self.storage_buffer.bind_group.as_ref().unwrap().clone();
+        let bind_group = self.storage_buffer.bind_group.clone();
         resources.resource_map.insert(type_id, Box::new(self));
         resources
             .bind_group_layouts
