@@ -1,4 +1,6 @@
-use std::{any::Any, collections::HashMap};
+use std::{any::Any, collections::HashMap, time::Duration};
+
+use hecs::{DynamicBundle, Entity};
 
 use crate::{
     audio::{
@@ -10,11 +12,41 @@ use crate::{
         instance::InstanceControllerTrait,
         pipelines::Material,
         render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
+        resource::Resources,
     },
 };
 
-pub enum RenderCommands {
+pub(crate) struct EngineTime {
+    pub(crate) frame_count: u32,
+    pub(crate) time_acc: Duration,
+    pub(crate) dt: Duration,
+}
+
+impl EngineTime {
+    pub(crate) fn update_time(&mut self, delta_time: Duration, print_fps: bool) {
+        self.frame_count += 1;
+        self.time_acc += delta_time;
+
+        if self.time_acc >= std::time::Duration::from_secs(1) {
+            let fps = self.frame_count as f64 / self.time_acc.as_secs_f64();
+            if print_fps {
+                println!("FPS: {:.2}", fps);
+            }
+
+            // reset
+            self.frame_count = 0;
+            self.time_acc = std::time::Duration::ZERO;
+        }
+    }
+
+    pub(crate) fn dt(&self) -> Duration {
+        self.dt
+    }
+}
+
+pub enum EngineCommandQueue {
     ChangeShader(MaterialHandle, String),
+    AddEntity(Box<dyn FnOnce(&mut hecs::World) + 'static>),
 }
 
 pub struct Arguments {
@@ -33,9 +65,9 @@ impl Arguments {
 }
 
 pub struct Engine {
-    pub frame_count: u32,
-    pub time_acc: std::time::Duration,
-    pub render_commands: Vec<RenderCommands>,
+    pub engine_time: EngineTime,
+    pub render_commands: Vec<EngineCommandQueue>,
+    pub resources: Resources,
     pub render_context: RenderContext,
     pub arguments: Arguments,
     pub audio_handler: Option<AudioHandler>,
@@ -43,25 +75,6 @@ pub struct Engine {
 }
 
 impl Engine {
-    // pub fn change_shader(&mut self, material: &MaterialHandle, shader: &str) {
-    //     if let Some(material) = self
-    //         .render_context
-    //         .gpu_objects
-    //         .materials
-    //         .get_mut(material.clone())
-    //         && let Some(shader) = self.render_context.shaders.get(shader)
-    //     {
-    //         material.change_shader(
-    //             &self.render_context.device,
-    //             self.render_context.config.format.clone(),
-    //             shader,
-    //         );
-    //     }
-    // }
-    pub fn change_shader(&mut self, material: &MaterialHandle, shader: &str) {
-        self.render_commands
-            .push(RenderCommands::ChangeShader(*material, shader.to_string()));
-    }
     pub(crate) fn change_shader_inner(&mut self, material: &MaterialHandle, shader: &str) {
         if let Some(material) = self
             .render_context

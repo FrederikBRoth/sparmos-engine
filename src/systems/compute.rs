@@ -116,7 +116,7 @@ impl<'a> ComputeBuilder<'a> {
             self.readback,
         );
         self.gfx
-            .world
+            .engine
             .resources
             .get_system_mut::<ComputeSystem>()
             .unwrap()

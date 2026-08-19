@@ -97,7 +97,7 @@ impl<'a> MaterialBuilder<'a> {
     pub fn compute_buffer(mut self, handle: ComputeHandle) -> Self {
         self.compute_render_buffer = Some(
             self.graphics
-                .world
+                .engine
                 .resources
                 .get_system_mut::<ComputeSystem>()
                 .unwrap()
@@ -146,7 +146,7 @@ impl<'a> MaterialBuilder<'a> {
         }
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
 
-        for system in self.graphics.world.resources.get_bind_group_layouts() {
+        for system in self.graphics.engine.resources.get_bind_group_layouts() {
             bind_group_layouts.push(system);
         }
         if let Some(texture) = &self.texture {
@@ -396,7 +396,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
 
         let compute = self
             .graphics
-            .world
+            .engine
             .resources
             .get_system_mut::<ComputeSystem>()
             .unwrap()
@@ -422,7 +422,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
 
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
 
-        for system in self.graphics.world.resources.get_bind_group_layouts() {
+        for system in self.graphics.engine.resources.get_bind_group_layouts() {
             bind_group_layouts.push(system);
         }
 

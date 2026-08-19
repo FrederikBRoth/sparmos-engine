@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
@@ -12,7 +14,7 @@ use winit::window::Window;
 
 use crate::application::graphics::Graphics;
 use crate::application::gui::EguiRenderer;
-use crate::core::engine::{Arguments, Engine, RenderCommands};
+use crate::core::engine::{Arguments, Engine, EngineCommandQueue, EngineTime};
 use crate::core::entities::World;
 use crate::core::geometry::Model;
 use crate::core::post_processing::PostProcessHandler;
@@ -41,22 +43,21 @@ pub struct State {
     pub graphics: Graphics,
 }
 pub trait Game {
-    fn update(&mut self, dt: std::time::Duration, engine: &mut Engine, world: &mut World);
+    fn update(&mut self, dt: std::time::Duration, gfx: &mut Graphics);
 
     fn process_event(
         &mut self,
         event: &WindowEvent,
         screen: &PhysicalSize<u32>,
-        engine: &mut Engine,
-        world: &mut World,
+        gfx: &mut Graphics,
     );
 
-    fn resize(&mut self, engine: &mut Engine, world: &mut World);
+    fn resize(&mut self, gfx: &mut Graphics);
 
     fn setup(&mut self, state: &mut State);
 
     #[cfg(feature = "gui")]
-    fn gui_setup(&mut self, dt: std::time::Duration, engine: &mut Engine, ui: &mut Ui);
+    fn gui_setup(&mut self, dt: std::time::Duration, gfx: &mut Graphics, ui: &mut Ui);
 }
 
 impl State {
@@ -197,14 +198,18 @@ impl State {
         let engine = Engine {
             render_context,
             arguments,
-            frame_count: 0,
-            time_acc: Duration::ZERO,
+            engine_time: EngineTime {
+                frame_count: 0,
+                time_acc: Duration::ZERO,
+                dt: Duration::ZERO,
+            },
             render_commands: Vec::new(),
             audio_handler: None,
+            resources: Resources::new(),
             audio_triggers: None,
         };
         let mut gfx = Graphics {
-            world: World::new(hecs::World::new(), Resources::new()),
+            world: Rc::new(RefCell::new(World::new(hecs::World::new()))),
             engine,
         };
 
@@ -212,7 +217,7 @@ impl State {
         //Compute
         let cs = ComputeSystem::new();
 
-        gfx.world.add_system(cs);
+        gfx.add_system(cs);
 
         // post_processing.new_effect(size, surface_format, Effect::ChromaticTwo);
 
@@ -285,72 +290,72 @@ impl State {
     }
     //
     pub fn update(&mut self, dt: std::time::Duration) {
-        self.graphics.engine.frame_count += 1;
-        self.graphics.engine.time_acc += dt;
-
-        if self.graphics.engine.time_acc >= std::time::Duration::from_secs(1) {
-            let fps = self.graphics.engine.frame_count as f64
-                / self.graphics.engine.time_acc.as_secs_f64();
-            println!("FPS: {:.2}", fps);
-
-            // reset
-            self.graphics.engine.frame_count = 0;
-            self.graphics.engine.time_acc = std::time::Duration::ZERO;
-        }
+        self.graphics.engine.engine_time.update_time(dt, true);
         {
-            let mut query = self
-                .graphics
+            // self.graphics.world.query(f);
+
+            self.graphics
                 .world
-                .entities
-                .query::<(&Renderable, &mut AnimationHandler)>();
-            for (renderable, ah) in query.iter() {
-                // ah.animate(dt.as_secs_f32());
-                let ic = self
-                    .graphics
-                    .engine
-                    .render_context
-                    .gpu_objects
-                    .instance_controllers
-                    .get_mut(renderable.instance_controller_handle)
-                    .unwrap();
+                .borrow()
+                .query::<(&Renderable, &mut AnimationHandler)>(|mut query| {
+                    for (renderable, ah) in query.iter() {
+                        // ah.animate(dt.as_secs_f32());
+                        let ic = self
+                            .graphics
+                            .engine
+                            .render_context
+                            .gpu_objects
+                            .instance_controllers
+                            .get_mut(renderable.instance_controller_handle)
+                            .unwrap();
 
-                ah.update_instance(dt.as_secs_f32(), ic.instances_mut().as_mut());
-            }
+                        ah.update_instance(dt.as_secs_f32(), ic.instances_mut().as_mut());
+                    }
+                });
         }
         {
-            let mut query = self.graphics.world.entities.query::<&Renderable>();
-            for renderable in query.iter() {
-                self.graphics
-                    .engine
-                    .render_context
-                    .gpu_objects
-                    .instance_controllers
-                    .get_mut(renderable.instance_controller_handle)
-                    .unwrap()
-                    .update_single(&self.graphics.engine.render_context.queue);
-            }
+            self.graphics
+                .world
+                .borrow()
+                .query::<&Renderable>(|mut query| {
+                    for renderable in query.iter() {
+                        self.graphics
+                            .engine
+                            .render_context
+                            .gpu_objects
+                            .instance_controllers
+                            .get_mut(renderable.instance_controller_handle)
+                            .unwrap()
+                            .update_single(&self.graphics.engine.render_context.queue);
+                    }
+                });
 
-            let mut query = self.graphics.world.entities.query::<&Model>();
-            for renderable in query.iter() {
-                self.graphics
-                    .engine
-                    .render_context
-                    .gpu_objects
-                    .instance_controllers
-                    .get_mut(renderable.instance)
-                    .unwrap()
-                    .update_single(&self.graphics.engine.render_context.queue);
-            }
+            self.graphics.world.borrow().query::<&Model>(|mut query| {
+                for renderable in query.iter() {
+                    self.graphics
+                        .engine
+                        .render_context
+                        .gpu_objects
+                        .instance_controllers
+                        .get_mut(renderable.instance)
+                        .unwrap()
+                        .update_single(&self.graphics.engine.render_context.queue);
+                }
+            });
         }
         self.graphics
             .world
-            .query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
-                |resources, (camera, camera_animator)| {
-                    let camera_system = resources.get_system_mut::<CameraSystem>().unwrap();
-                    camera_system.update_camera(dt, &self.graphics.engine.render_context, camera);
-                    camera_animator.update(dt.as_secs_f32(), camera);
-                },
-            );
+            .borrow()
+            .query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
+                let camera_system = self
+                    .graphics
+                    .engine
+                    .resources
+                    .get_system_mut::<CameraSystem>()
+                    .unwrap();
+                camera_system.update_camera(dt, &self.graphics.engine.render_context, camera);
+                camera_animator.update(dt.as_secs_f32(), camera);
+            });
     }
 
     pub fn render(&mut self, dt: std::time::Duration, game: &mut Box<dyn Game>) {
@@ -375,53 +380,55 @@ impl State {
                 {
                     if let Some(computes) = self
                         .graphics
-                        .world
+                        .engine
                         .resources
                         .get_system_mut::<ComputeSystem>()
                     {
-                        for compute in self
-                            .graphics
+                        self.graphics
                             .world
-                            .entities
-                            .query::<&ComputeHandle>()
-                            .iter()
-                        {
-                            let compute_pipeline = computes.get(*compute).unwrap();
-                            if compute_pipeline.readback_status == ReadbackState::Pending {
-                                continue;
-                            };
-                            let num_dispatches = compute_pipeline.length.div_ceil(64) as u32;
+                            .borrow()
+                            .query::<&ComputeHandle>(|mut query| {
+                                for compute in query.iter() {
+                                    let compute_pipeline = computes.get(*compute).unwrap();
+                                    if compute_pipeline.readback_status == ReadbackState::Pending {
+                                        continue;
+                                    };
+                                    let num_dispatches =
+                                        compute_pipeline.length.div_ceil(64) as u32;
 
-                            {
-                                let mut pass = encoder.begin_compute_pass(&Default::default());
+                                    {
+                                        let mut pass =
+                                            encoder.begin_compute_pass(&Default::default());
 
-                                pass.set_pipeline(&compute_pipeline.pipeline);
-                                let mut bind_group_index = 0;
-                                for input_buffer in compute_pipeline.input_buffers.iter() {
-                                    pass.set_bind_group(
-                                        bind_group_index,
-                                        Some(&input_buffer.bind_group),
-                                        &[],
-                                    );
-                                    bind_group_index += 1;
+                                        pass.set_pipeline(&compute_pipeline.pipeline);
+                                        let mut bind_group_index = 0;
+                                        for input_buffer in compute_pipeline.input_buffers.iter() {
+                                            pass.set_bind_group(
+                                                bind_group_index,
+                                                Some(&input_buffer.bind_group),
+                                                &[],
+                                            );
+                                            bind_group_index += 1;
+                                        }
+                                        pass.set_bind_group(
+                                            bind_group_index,
+                                            Some(&compute_pipeline.output_buffer.bind_group),
+                                            &[],
+                                        );
+                                        pass.dispatch_workgroups(num_dispatches, 1, 1);
+                                    }
+                                    if let Some(temp_buffer) = compute_pipeline.temp_buffer.as_ref()
+                                    {
+                                        encoder.copy_buffer_to_buffer(
+                                            &compute_pipeline.output_buffer.buffer,
+                                            0,
+                                            &temp_buffer,
+                                            0,
+                                            compute_pipeline.output_buffer.buffer.size(),
+                                        );
+                                    }
                                 }
-                                pass.set_bind_group(
-                                    bind_group_index,
-                                    Some(&compute_pipeline.output_buffer.bind_group),
-                                    &[],
-                                );
-                                pass.dispatch_workgroups(num_dispatches, 1, 1);
-                            }
-                            if let Some(temp_buffer) = compute_pipeline.temp_buffer.as_ref() {
-                                encoder.copy_buffer_to_buffer(
-                                    &compute_pipeline.output_buffer.buffer,
-                                    0,
-                                    &temp_buffer,
-                                    0,
-                                    compute_pipeline.output_buffer.buffer.size(),
-                                );
-                            }
-                        }
+                            });
                     }
                 }
 
@@ -479,7 +486,7 @@ impl State {
                         render_pass.draw_scene(
                             &self.backend,
                             &self.graphics.engine,
-                            &self.graphics.world,
+                            &self.graphics.world.borrow(),
                         );
                     }
 
@@ -589,7 +596,7 @@ impl State {
                         render_pass.draw_scene(
                             &self.backend,
                             &self.graphics.engine,
-                            &self.graphics.world,
+                            &self.graphics.world.borrow(),
                         );
                     }
                 }
@@ -607,7 +614,7 @@ impl State {
                     };
 
                     let full_output = self.egui_renderer.start_gui(&self.window, |ui| {
-                        game.gui_setup(dt, &mut self.graphics.engine, ui);
+                        game.gui_setup(dt, &mut self.graphics, ui);
                     });
                     self.egui_renderer.end_frame_and_draw(
                         &self.graphics.engine.render_context.device,
@@ -629,10 +636,14 @@ impl State {
                 let mut commands = std::mem::take(&mut self.graphics.engine.render_commands);
                 for command in commands.drain(..) {
                     match command {
-                        RenderCommands::ChangeShader(material_handle, shader) => {
+                        EngineCommandQueue::ChangeShader(material_handle, shader) => {
                             self.graphics
                                 .engine
                                 .change_shader_inner(&material_handle, &shader);
+                        }
+                        EngineCommandQueue::AddEntity(fn_once) => {
+                            let mut world = self.graphics.world.borrow_mut();
+                            fn_once(&mut world.entities);
                         }
                     }
                 }

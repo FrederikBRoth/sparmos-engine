@@ -23,22 +23,22 @@ pub struct Resources {
 }
 
 impl Resources {
-    pub fn get_bindgroup<T: 'static>(&self) -> Option<&wgpu::BindGroup> {
+    pub(crate) fn get_bindgroup<T: 'static>(&self) -> Option<&wgpu::BindGroup> {
         self.bind_groups.get(&TypeId::of::<T>())
     }
 
-    pub fn get_system<T: 'static>(&self) -> Option<&T> {
+    pub(crate) fn get_system<T: 'static>(&self) -> Option<&T> {
         self.resource_map
             .get(&TypeId::of::<T>())
             .and_then(|system| system.downcast_ref::<T>())
     }
 
-    pub fn get_system_mut<T: 'static>(&mut self) -> Option<&mut T> {
+    pub(crate) fn get_system_mut<T: 'static>(&mut self) -> Option<&mut T> {
         self.resource_map
             .get_mut(&TypeId::of::<T>())
             .and_then(|system| system.downcast_mut::<T>())
     }
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Resources {
             resource_map: HashMap::new(),
             bind_group_layouts: IndexMap::new(),
@@ -46,7 +46,7 @@ impl Resources {
         }
     }
 
-    pub fn get_bind_group_layouts(&self) -> Vec<Option<&wgpu::BindGroupLayout>> {
+    pub(crate) fn get_bind_group_layouts(&self) -> Vec<Option<&wgpu::BindGroupLayout>> {
         self.bind_group_layouts
             .values()
             .map(|resource| Some(resource))

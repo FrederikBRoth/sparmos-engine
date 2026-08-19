@@ -163,7 +163,7 @@ where
                             let size = state.window().inner_size();
 
                             state.resize(size);
-                            game.resize(&mut state.graphics.engine, &mut state.graphics.world);
+                            game.resize(&mut state.graphics);
 
                             state.window().request_redraw();
 
@@ -180,7 +180,7 @@ where
                         let state = self.state.as_mut().unwrap();
                         if let Some(computes) = state
                             .graphics
-                            .world
+                            .engine
                             .resources
                             .get_system_mut::<ComputeSystem>()
                         {
@@ -243,50 +243,45 @@ where
 
                 if let Some(computes) = state
                     .graphics
-                    .world
+                    .engine
                     .resources
                     .get_system_mut::<ComputeSystem>()
                 {
-                    for compute_handle in state
+                    state
                         .graphics
                         .world
-                        .entities
-                        .query::<&ComputeHandle>()
-                        .iter()
-                    {
-                        let compute = computes.get(*compute_handle).unwrap();
-                        match compute.readback_status {
-                            ReadbackState::NoReadback | ReadbackState::Pending => continue,
-                            ReadbackState::Available => {
-                                compute.readback_status = ReadbackState::Pending;
-                                readback(
-                                    &compute.temp_buffer.as_ref().unwrap(),
-                                    *compute_handle,
-                                    &self.proxy.clone().unwrap(),
-                                );
+                        .borrow()
+                        .query::<&ComputeHandle>(|mut handle| {
+                            for compute_handle in handle.iter() {
+                                let compute = computes.get(*compute_handle).unwrap();
+                                match compute.readback_status {
+                                    ReadbackState::NoReadback | ReadbackState::Pending => continue,
+                                    ReadbackState::Available => {
+                                        compute.readback_status = ReadbackState::Pending;
+                                        readback(
+                                            &compute.temp_buffer.as_ref().unwrap(),
+                                            *compute_handle,
+                                            &self.proxy.clone().unwrap(),
+                                        );
+                                    }
+                                }
                             }
-                        }
-                    }
+                        });
                 }
                 state.update(dt);
                 // println!("test");
 
-                game.update(dt, &mut state.graphics.engine, &mut state.graphics.world);
+                game.update(dt, &mut state.graphics);
             }
 
             WindowEvent::Resized(size) => {
                 state.resize(size);
-                game.resize(&mut state.graphics.engine, &mut state.graphics.world);
+                game.resize(&mut state.graphics);
             }
 
             _ => {
                 state.input(&event);
-                game.process_event(
-                    &event,
-                    &state.size,
-                    &mut state.graphics.engine,
-                    &mut state.graphics.world,
-                );
+                game.process_event(&event, &state.size, &mut state.graphics);
             }
         }
     }
