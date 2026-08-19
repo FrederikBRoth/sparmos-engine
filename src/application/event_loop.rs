@@ -269,19 +269,26 @@ where
                         });
                 }
                 state.update(dt);
-                // println!("test");
+                let world = state.graphics.get_world();
+                let world = world.borrow();
 
-                game.update(&mut state.graphics);
+                game.update(&mut state.graphics, world);
             }
 
             WindowEvent::Resized(size) => {
                 state.resize(size);
-                game.resize(&mut state.graphics);
+                let world = state.graphics.get_world();
+                let world = world.borrow();
+
+                game.resize(&mut state.graphics, world);
             }
 
             _ => {
                 state.input(&event);
-                game.process_event(&event, &state.size, &mut state.graphics);
+                let world = state.graphics.get_world();
+                let world = world.borrow();
+
+                game.process_event(&event, &state.size, &mut state.graphics, world);
             }
         }
     }

@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -43,16 +43,17 @@ pub struct State {
     pub graphics: Graphics,
 }
 pub trait Game {
-    fn update(&mut self, gfx: &mut Graphics);
+    fn update(&mut self, gfx: &mut Graphics, world: Ref<'_, World>);
 
     fn process_event(
         &mut self,
         event: &WindowEvent,
         screen: &PhysicalSize<u32>,
         gfx: &mut Graphics,
+        world: Ref<'_, World>,
     );
 
-    fn resize(&mut self, gfx: &mut Graphics);
+    fn resize(&mut self, gfx: &mut Graphics, world: Ref<'_, World>);
 
     fn setup(&mut self, state: &mut State);
 

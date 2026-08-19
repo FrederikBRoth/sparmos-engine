@@ -118,7 +118,6 @@ impl Graphics {
         if let Some(mut world) = world.try_borrow_mut().ok() {
             world.add_entity(bundle)
         } else {
-            println!("queueing!");
             let entity = world.borrow().entities.reserve_entity();
             let entity_clone = entity.clone();
             let command = AddEntity(Box::new(move |world| {
@@ -164,7 +163,7 @@ impl Graphics {
     where
         B: Query,
     {
-        let world = &self.world.borrow_mut();
+        let world = &self.world.borrow();
 
         world.query_first(f);
     }
@@ -187,7 +186,7 @@ impl Graphics {
     where
         B: Query,
     {
-        let world = &self.world.borrow_mut();
+        let world = &self.world.borrow();
 
         world.query(f);
     }
