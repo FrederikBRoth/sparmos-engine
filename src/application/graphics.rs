@@ -1,13 +1,7 @@
-use std::{
-    any::TypeId,
-    cell::{RefCell, RefMut},
-    mem,
-    rc::Rc,
-    sync::Arc,
-};
+use std::{any::TypeId, cell::RefCell, mem, rc::Rc, sync::Arc, time::Duration};
 
 use cgmath::Vector3;
-use hecs::{DynamicBundle, DynamicBundleClone, Entity, Query, QueryBorrow};
+use hecs::{DynamicBundle, Entity, Query, QueryBorrow};
 use indexmap::IndexMap;
 use wgpu::{Device, Queue};
 
@@ -48,16 +42,20 @@ impl Graphics {
             ));
     }
 
+    /// Returns a reference to the get device of this [`Graphics`].
     pub(crate) fn get_device(&self) -> &Arc<Device> {
         &self.engine.render_context.device
     }
+    /// Returns a reference to the get queue of this [`Graphics`].
     pub(crate) fn get_queue(&self) -> &Arc<Queue> {
         &self.engine.render_context.queue
     }
 
+    /// Returns a mutable reference to the get device of this [`Graphics`].
     pub(crate) fn get_device_mut(&mut self) -> &mut Arc<Device> {
         &mut self.engine.render_context.device
     }
+    /// Returns a mutable reference to the get queue of this [`Graphics`].
     pub(crate) fn get_queue_mut(&mut self) -> &mut Arc<Queue> {
         &mut self.engine.render_context.queue
     }
@@ -69,6 +67,7 @@ impl Graphics {
         &self.engine.render_context
     }
 
+    /// Returns the material of this [`Graphics`].
     pub fn material<V: Vertex, I: RawInstance>(&mut self) -> MaterialBuilder<'_> {
         MaterialBuilder {
             graphics: self,
@@ -191,5 +190,9 @@ impl Graphics {
         let world = &self.world.borrow_mut();
 
         world.query(f);
+    }
+
+    pub fn dt(&self) -> Duration {
+        self.engine.engine_time.dt()
     }
 }

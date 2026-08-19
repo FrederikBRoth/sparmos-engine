@@ -1,7 +1,5 @@
 use std::{any::Any, collections::HashMap, time::Duration};
 
-use hecs::{DynamicBundle, Entity};
-
 use crate::{
     audio::{
         audio_handler::{AudioHandler, AudioTrigger},
@@ -16,7 +14,7 @@ use crate::{
     },
 };
 
-pub(crate) struct EngineTime {
+pub struct EngineTime {
     pub(crate) frame_count: u32,
     pub(crate) time_acc: Duration,
     pub(crate) dt: Duration,

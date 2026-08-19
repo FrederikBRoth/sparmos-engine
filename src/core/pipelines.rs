@@ -10,7 +10,6 @@ use crate::{
     core::{
         buffer::{Buffer, BufferKey, BufferType, UniformParameters},
         geometry::{Vertex, VertexBufferLayoutOwned, VertexLayoutKey},
-        instance::RawInstance,
         render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle},
         texture::Texture,
     },

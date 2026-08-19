@@ -271,7 +271,7 @@ where
                 state.update(dt);
                 // println!("test");
 
-                game.update(dt, &mut state.graphics);
+                game.update(&mut state.graphics);
             }
 
             WindowEvent::Resized(size) => {

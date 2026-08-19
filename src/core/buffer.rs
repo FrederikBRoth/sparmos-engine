@@ -1,5 +1,3 @@
-use std::mem;
-
 use wgpu::{BindGroupLayoutEntry, util::DeviceExt};
 
 #[repr(C)]

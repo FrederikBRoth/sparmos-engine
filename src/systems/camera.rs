@@ -4,7 +4,7 @@ use cgmath::{
     EuclideanSpace, InnerSpace, Point3, Quaternion, Rad, Rotation, Rotation3, SquareMatrix,
     Vector3, Vector4,
 };
-use wgpu::{BindGroupLayout, Device, util::DeviceExt};
+use wgpu::{BindGroupLayout, Device};
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, KeyEvent, WindowEvent},

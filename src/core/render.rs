@@ -12,7 +12,7 @@ use crate::{
         instance::InstanceControllerTrait,
         pipelines::{ComputeRendering, ComputeRenderingKey, Material, MaterialKey},
         post_processing::PostProcessHandler,
-        texture::{self, Texture, TextureSampleView},
+        texture::{Texture, TextureSampleView},
     },
 };
 

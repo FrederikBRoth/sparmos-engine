@@ -43,7 +43,7 @@ pub struct State {
     pub graphics: Graphics,
 }
 pub trait Game {
-    fn update(&mut self, dt: std::time::Duration, gfx: &mut Graphics);
+    fn update(&mut self, gfx: &mut Graphics);
 
     fn process_event(
         &mut self,
@@ -292,8 +292,6 @@ impl State {
     pub fn update(&mut self, dt: std::time::Duration) {
         self.graphics.engine.engine_time.update_time(dt, true);
         {
-            // self.graphics.world.query(f);
-
             self.graphics
                 .world
                 .borrow()

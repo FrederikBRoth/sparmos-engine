@@ -1,7 +1,7 @@
-use std::{any::TypeId, mem};
+use std::any::TypeId;
 
 use slotmap::SlotMap;
-use wgpu::{BindGroup, BindGroupLayout, BufferUsages, ComputePipeline, ShaderStages};
+use wgpu::{BindGroupLayout, BufferUsages, ComputePipeline, ShaderStages};
 
 use crate::{
     application::graphics::Graphics,
