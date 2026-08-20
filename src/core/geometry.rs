@@ -226,6 +226,10 @@ impl Mesh {
 }
 
 //Models can contain multiple meshes each with (potentially)
+pub struct ModelBuilder<'a> {
+    pub(crate) data: &'a [u8],
+}
+
 pub struct Model {
     pub meshes: Vec<(MeshHandle, Option<TextureHandle>)>,
     pub instance: InstanceControllerHandle,
