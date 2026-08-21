@@ -4,52 +4,37 @@ use std::{
 };
 
 use indexmap::IndexMap;
+use slotmap::{SlotMap, new_key_type};
 use wgpu::{BindGroup, BindGroupLayout};
 
-pub trait GpuBindable {
-    fn get_bind_group_layout(&self) -> &BindGroupLayout;
-}
+use crate::core::buffer::Buffer;
 
-pub trait System {
-    fn get_system_name(&self) -> String;
-    fn register(self, resources: &mut Resources);
-}
-
+new_key_type! { pub struct BufferHandle; }
 pub struct Resources {
-    //For quick bind_group reading, that avoids vtable lookups
-    pub resource_map: HashMap<TypeId, Box<dyn Any>>,
-    pub bind_group_layouts: IndexMap<TypeId, BindGroupLayout>,
-    pub bind_groups: IndexMap<TypeId, BindGroup>,
+    pub buffers: SlotMap<BufferHandle, Buffer>,
 }
 
 impl Resources {
-    pub(crate) fn get_bindgroup<T: 'static>(&self) -> Option<&wgpu::BindGroup> {
-        self.bind_groups.get(&TypeId::of::<T>())
+    pub(crate) fn get_bindgroup(&self, handle: BufferHandle) -> Option<&wgpu::BindGroup> {
+        self.buffers.get(handle).map(|buffer| &buffer.bind_group)
     }
 
-    pub(crate) fn get_system<T: 'static>(&self) -> Option<&T> {
-        self.resource_map
-            .get(&TypeId::of::<T>())
-            .and_then(|system| system.downcast_ref::<T>())
-    }
-
-    pub(crate) fn get_system_mut<T: 'static>(&mut self) -> Option<&mut T> {
-        self.resource_map
-            .get_mut(&TypeId::of::<T>())
-            .and_then(|system| system.downcast_mut::<T>())
-    }
     pub(crate) fn new() -> Self {
         Resources {
-            resource_map: HashMap::new(),
-            bind_group_layouts: IndexMap::new(),
-            bind_groups: IndexMap::new(),
+            buffers: SlotMap::with_key(),
         }
     }
 
     pub(crate) fn get_bind_group_layouts(&self) -> Vec<Option<&wgpu::BindGroupLayout>> {
-        self.bind_group_layouts
+        self.buffers
             .values()
-            .map(|resource| Some(resource))
+            .map(|resource| Some(&resource.bind_group_layout))
+            .collect()
+    }
+    pub(crate) fn get_bind_groups(&self) -> Vec<Option<&wgpu::BindGroup>> {
+        self.buffers
+            .values()
+            .map(|resource| Some(&resource.bind_group))
             .collect()
     }
 }

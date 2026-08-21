@@ -14,7 +14,7 @@ use winit::window::Window;
 
 use crate::application::graphics::Graphics;
 use crate::application::gui::EguiRenderer;
-use crate::core::engine::{Arguments, Engine, EngineCommandQueue, EngineTime};
+use crate::core::engine::{Arguments, Engine, EngineCommandQueue, EngineTime, Systems};
 use crate::core::entities::World;
 use crate::core::geometry::Model;
 use crate::core::post_processing::PostProcessHandler;
@@ -22,8 +22,7 @@ use crate::core::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext, Re
 use crate::core::resource::Resources;
 use crate::core::texture::Texture;
 use crate::systems::animation::AnimationHandler;
-use crate::systems::camera::{Camera, CameraAnimator, CameraSystem};
-use crate::systems::compute::{ComputeSystem, ReadbackState};
+use crate::systems::compute::ReadbackState;
 
 pub enum DeviceBackend {
     WebGL,
@@ -206,6 +205,7 @@ impl State {
             },
             render_commands: Vec::new(),
             audio_handler: None,
+            systems: Systems { systems: vec![] },
             resources: Resources::new(),
             audio_triggers: None,
         };
@@ -216,9 +216,6 @@ impl State {
 
         //Setup basic systems
         //Compute
-        let cs = ComputeSystem::new();
-
-        gfx.add_system(cs);
 
         // post_processing.new_effect(size, surface_format, Effect::ChromaticTwo);
 
@@ -342,19 +339,7 @@ impl State {
                 }
             });
         }
-        self.graphics
-            .world
-            .borrow()
-            .query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
-                let camera_system = self
-                    .graphics
-                    .engine
-                    .resources
-                    .get_system_mut::<CameraSystem>()
-                    .unwrap();
-                camera_system.update_camera(dt, &self.graphics.engine.render_context, camera);
-                camera_animator.update(dt.as_secs_f32(), camera);
-            });
+        self.graphics.run_all_systems();
     }
 
     pub fn render(&mut self, dt: std::time::Duration, game: &mut Box<dyn Game>) {
@@ -377,58 +362,55 @@ impl State {
                         label: Some("Render Encoder"),
                     });
                 {
-                    if let Some(computes) = self
-                        .graphics
-                        .engine
-                        .resources
-                        .get_system_mut::<ComputeSystem>()
-                    {
-                        self.graphics
-                            .world
-                            .borrow()
-                            .query::<&ComputeHandle>(|mut query| {
-                                for compute in query.iter() {
-                                    let compute_pipeline = computes.get(*compute).unwrap();
-                                    if compute_pipeline.readback_status == ReadbackState::Pending {
-                                        continue;
-                                    };
-                                    let num_dispatches =
-                                        compute_pipeline.length.div_ceil(64) as u32;
+                    self.graphics
+                        .world
+                        .borrow()
+                        .query::<&ComputeHandle>(|mut query| {
+                            for compute in query.iter() {
+                                let compute_pipeline = self
+                                    .graphics
+                                    .engine
+                                    .render_context
+                                    .gpu_objects
+                                    .computes
+                                    .get(*compute)
+                                    .unwrap();
+                                if compute_pipeline.readback_status == ReadbackState::Pending {
+                                    continue;
+                                };
+                                let num_dispatches = compute_pipeline.length.div_ceil(64) as u32;
 
-                                    {
-                                        let mut pass =
-                                            encoder.begin_compute_pass(&Default::default());
+                                {
+                                    let mut pass = encoder.begin_compute_pass(&Default::default());
 
-                                        pass.set_pipeline(&compute_pipeline.pipeline);
-                                        let mut bind_group_index = 0;
-                                        for input_buffer in compute_pipeline.input_buffers.iter() {
-                                            pass.set_bind_group(
-                                                bind_group_index,
-                                                Some(&input_buffer.bind_group),
-                                                &[],
-                                            );
-                                            bind_group_index += 1;
-                                        }
+                                    pass.set_pipeline(&compute_pipeline.pipeline);
+                                    let mut bind_group_index = 0;
+                                    for input_buffer in compute_pipeline.input_buffers.iter() {
                                         pass.set_bind_group(
                                             bind_group_index,
-                                            Some(&compute_pipeline.output_buffer.bind_group),
+                                            Some(&input_buffer.bind_group),
                                             &[],
                                         );
-                                        pass.dispatch_workgroups(num_dispatches, 1, 1);
+                                        bind_group_index += 1;
                                     }
-                                    if let Some(temp_buffer) = compute_pipeline.temp_buffer.as_ref()
-                                    {
-                                        encoder.copy_buffer_to_buffer(
-                                            &compute_pipeline.output_buffer.buffer,
-                                            0,
-                                            &temp_buffer,
-                                            0,
-                                            compute_pipeline.output_buffer.buffer.size(),
-                                        );
-                                    }
+                                    pass.set_bind_group(
+                                        bind_group_index,
+                                        Some(&compute_pipeline.output_buffer.bind_group),
+                                        &[],
+                                    );
+                                    pass.dispatch_workgroups(num_dispatches, 1, 1);
                                 }
-                            });
-                    }
+                                if let Some(temp_buffer) = compute_pipeline.temp_buffer.as_ref() {
+                                    encoder.copy_buffer_to_buffer(
+                                        &compute_pipeline.output_buffer.buffer,
+                                        0,
+                                        &temp_buffer,
+                                        0,
+                                        compute_pipeline.output_buffer.buffer.size(),
+                                    );
+                                }
+                            }
+                        });
                 }
 
                 if self

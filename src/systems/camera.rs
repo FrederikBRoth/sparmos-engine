@@ -1,4 +1,4 @@
-use std::any::TypeId;
+use std::{any::TypeId, cell::Ref};
 
 use cgmath::{
     EuclideanSpace, InnerSpace, Point3, Quaternion, Rad, Rotation, Rotation3, SquareMatrix,
@@ -12,10 +12,13 @@ use winit::{
 };
 
 use crate::{
+    application::graphics::Graphics,
     core::{
         buffer::{Buffer, BufferType, UniformParameters},
+        engine::System,
+        entities::World,
         render::RenderContext,
-        resource::{GpuBindable, System},
+        resource::BufferHandle,
     },
     helpers::line_trace::OPENGL_TO_WGPU_MATRIX,
     systems::animation::{AnimationHandler, AnimationType},
@@ -127,10 +130,28 @@ pub struct Camera {
     pub pitch: f32,
     pub forward: Vector3<f32>,
     pub camera_mode: CameraMode,
+
+    pub auto: bool,
+    pub speed: f32,
+
+    pub sensitivity: f32,
+
+    pub is_up_pressed: MovementPress,
+    pub is_down_pressed: MovementPress,
+    pub is_forward_pressed: MovementPress,
+    pub is_backward_pressed: MovementPress,
+    pub is_left_pressed: MovementPress,
+    pub is_right_pressed: MovementPress,
+    pub is_tilt_up_pressed: MovementPress,
+    pub is_tilt_down_pressed: MovementPress,
+    pub is_turn_left_pressed: MovementPress,
+    pub is_turn_right_pressed: MovementPress,
+    pub rotate_left: MovementPress,
+    pub rotate_right: MovementPress,
 }
 
 impl Camera {
-    pub fn new(screen_size: PhysicalSize<f32>) -> Self {
+    pub fn new(screen_size: PhysicalSize<f32>, speed: f32, sensitivity: f32) -> Self {
         let eye = Point3::new(0.0, 0.0, -400.0);
         let target = Point3::new(0.0, 0.0, 0.0);
 
@@ -146,6 +167,21 @@ impl Camera {
             znear: 0.1,
             zfar: 5000.0,
             camera_mode: CameraMode::FreeMode,
+            is_up_pressed: MovementPress::NotPressed,
+            is_down_pressed: MovementPress::NotPressed,
+            is_forward_pressed: MovementPress::NotPressed,
+            is_backward_pressed: MovementPress::NotPressed,
+            is_left_pressed: MovementPress::NotPressed,
+            is_right_pressed: MovementPress::NotPressed,
+            is_tilt_up_pressed: MovementPress::NotPressed,
+            is_tilt_down_pressed: MovementPress::NotPressed,
+            is_turn_left_pressed: MovementPress::NotPressed,
+            is_turn_right_pressed: MovementPress::NotPressed,
+            rotate_left: MovementPress::NotPressed,
+            rotate_right: MovementPress::NotPressed,
+            auto: false,
+            speed,
+            sensitivity,
         };
         camera.update_forward();
         camera
@@ -229,92 +265,9 @@ impl Camera {
     pub fn set_camera_mode(&mut self, mode: CameraMode) {
         self.camera_mode = mode;
     }
-}
 
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct CameraUniform {
-    view_position: [f32; 4],
-    view_proj: [[f32; 4]; 4],
-}
-
-impl CameraUniform {
-    pub fn new() -> Self {
-        Self {
-            view_position: [0.0; 4],
-            view_proj: cgmath::Matrix4::identity().into(),
-        }
-    }
-
-    pub fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_position = camera.eye.to_homogeneous().into();
-        self.view_proj = (OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix()).into();
-    }
-}
-
-impl Default for CameraUniform {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct CameraSystem {
-    // pub camera: Camera,
-    pub camera_uniform: CameraUniform,
-    pub camera_buffer: Buffer,
-    pub auto: bool,
-    pub speed: f32,
-
-    pub sensitivity: f32,
-
-    pub is_up_pressed: MovementPress,
-    pub is_down_pressed: MovementPress,
-    pub is_forward_pressed: MovementPress,
-    pub is_backward_pressed: MovementPress,
-    pub is_left_pressed: MovementPress,
-    pub is_right_pressed: MovementPress,
-    pub is_tilt_up_pressed: MovementPress,
-    pub is_tilt_down_pressed: MovementPress,
-    pub is_turn_left_pressed: MovementPress,
-    pub is_turn_right_pressed: MovementPress,
-    pub rotate_left: MovementPress,
-    pub rotate_right: MovementPress,
-}
-
-impl CameraSystem {
-    pub fn new(speed: f32, sensitivity: f32, device: &Device, camera: &Camera) -> Self {
-        let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(camera);
-        let camera_buffer = Buffer::new_init(
-            &[camera_uniform],
-            device,
-            BufferType::UniformBuffer(UniformParameters::default()),
-        );
-
-        log::warn!("Shader");
-        Self {
-            auto: false,
-            speed,
-            sensitivity,
-            camera_buffer,
-            camera_uniform,
-            is_up_pressed: MovementPress::NotPressed,
-            is_down_pressed: MovementPress::NotPressed,
-            is_forward_pressed: MovementPress::NotPressed,
-            is_backward_pressed: MovementPress::NotPressed,
-            is_left_pressed: MovementPress::NotPressed,
-            is_right_pressed: MovementPress::NotPressed,
-            is_tilt_up_pressed: MovementPress::NotPressed,
-            is_tilt_down_pressed: MovementPress::NotPressed,
-            is_turn_left_pressed: MovementPress::NotPressed,
-            is_turn_right_pressed: MovementPress::NotPressed,
-            rotate_left: MovementPress::NotPressed,
-            rotate_right: MovementPress::NotPressed,
-        }
-    }
-
-    pub fn process_events(&mut self, event: &WindowEvent, camera: &mut Camera) -> bool {
-        if let CameraMode::AnimatedMode = camera.camera_mode {
+    pub fn process_events(&mut self, event: &WindowEvent) -> bool {
+        if let CameraMode::AnimatedMode = self.camera_mode {
             self.reset_input();
             return false;
         }
@@ -345,7 +298,6 @@ impl CameraSystem {
                     }
                     KeyCode::KeyA => {
                         self.is_left_pressed = get_press_from_bool(is_pressed);
-
                         true
                     }
                     KeyCode::KeyS => {
@@ -372,10 +324,10 @@ impl CameraSystem {
                         self.is_turn_right_pressed = get_press_from_bool(is_pressed);
                         true
                     }
-                    KeyCode::Insert => {
+                    KeyCode::KeyU => {
                         println!(
                             "Position: {:?}, Yaw: {:?}, Pitch {:?}",
-                            camera.eye, camera.yaw, camera.pitch
+                            self.eye, self.yaw, self.pitch
                         );
                         true
                     }
@@ -393,66 +345,61 @@ impl CameraSystem {
         camera.update_forward();
     }
 
-    pub fn update_camera(
-        &mut self,
-        dt: std::time::Duration,
-        rc: &RenderContext,
-        camera: &mut Camera,
-    ) {
-        let right: Vector3<f32> = camera.forward.cross(camera.up).normalize();
+    pub fn update_camera(&mut self, dt: std::time::Duration) {
+        let right: Vector3<f32> = self.forward.cross(self.up).normalize();
 
         if self.is_forward_pressed.is_pressed() {
-            camera.eye += camera.forward * self.speed * dt.as_secs_f32();
+            self.eye += self.forward * self.speed * dt.as_secs_f32();
         }
         if self.is_backward_pressed.is_pressed() {
-            camera.eye -= camera.forward * self.speed * dt.as_secs_f32();
+            self.eye -= self.forward * self.speed * dt.as_secs_f32();
         }
         if self.is_right_pressed.is_pressed() {
-            camera.eye += right * self.speed * dt.as_secs_f32();
+            self.eye += right * self.speed * dt.as_secs_f32();
         }
         if self.is_left_pressed.is_pressed() {
-            camera.eye -= right * self.speed * dt.as_secs_f32();
+            self.eye -= right * self.speed * dt.as_secs_f32();
         }
         if self.is_up_pressed.is_pressed() {
-            camera.eye += camera.up * self.speed * dt.as_secs_f32();
+            self.eye += self.up * self.speed * dt.as_secs_f32();
         }
         if self.is_down_pressed.is_pressed() {
-            camera.eye -= camera.up * self.speed * dt.as_secs_f32();
+            self.eye -= self.up * self.speed * dt.as_secs_f32();
         }
         if self.is_tilt_up_pressed.is_pressed() {
-            camera.pitch -= self.sensitivity * dt.as_secs_f32();
-            camera.update_forward();
+            self.pitch -= self.sensitivity * dt.as_secs_f32();
+            self.update_forward();
         }
         if self.is_tilt_down_pressed.is_pressed() {
-            camera.pitch += self.sensitivity * dt.as_secs_f32();
-            camera.update_forward();
+            self.pitch += self.sensitivity * dt.as_secs_f32();
+            self.update_forward();
         }
         if self.is_turn_left_pressed.is_pressed() {
-            camera.yaw -= self.sensitivity * dt.as_secs_f32();
-            camera.update_forward();
+            self.yaw -= self.sensitivity * dt.as_secs_f32();
+            self.update_forward();
         }
         if self.is_turn_right_pressed.is_pressed() {
-            camera.yaw += self.sensitivity * dt.as_secs_f32();
-            camera.update_forward();
+            self.yaw += self.sensitivity * dt.as_secs_f32();
+            self.update_forward();
         }
 
         if self.rotate_left.is_pressed() {
             let dt = dt.as_secs_f32();
 
             // vector from target → eye
-            let offset = camera.eye - camera.target;
+            let offset = self.eye - self.target;
 
             // preserve radius
             let radius = offset.magnitude();
 
             // create rotation around the up axis
-            let rotation = Quaternion::from_axis_angle(camera.up.normalize(), Rad(self.speed * dt));
+            let rotation = Quaternion::from_axis_angle(self.up.normalize(), Rad(self.speed * dt));
 
             // rotate the offset
             let new_offset = rotation.rotate_vector(offset);
 
             // reapply radius (avoids drift)
-            camera.eye = camera.target + new_offset.normalize() * radius;
+            self.eye = self.target + new_offset.normalize() * radius;
         }
         if self.rotate_right.is_pressed() {
             // self.camera.eye =
@@ -469,55 +416,8 @@ impl CameraSystem {
         //     self.camera.eye += right * self.speed;
         //     self.camera.target += right * self.speed;
         // }
-
-        self.camera_uniform.update_view_proj(camera);
-        rc.queue.write_buffer(
-            &self.camera_buffer.buffer,
-            0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
-        );
     }
 
-    // pub fn animate_camera(&mut self, dt: f32) {
-    //     if !self.camera.camera_animator.animating
-    //         || self.camera.camera_animator.aspect_ratio_limit > self.camera.aspect
-    //     {
-    //         return;
-    //     }
-    //     self.camera.camera_animator.time += dt * self.camera.camera_animator.speed;
-    //     self.camera.camera_animator.time = self.camera.camera_animator.time.clamp(0.0, 1.0);
-    //
-    //     let lerped = self.camera.camera_animator.lerp();
-    //     // self.camera.eye = Point3::new(lerped.0.x, self.camera.eye.y, lerped.0.z);
-    //     // self.camera.target = Point3::new(lerped.1.x, self.camera.target.y, lerped.1.z);
-    //     self.camera.eye = lerped.0;
-    //     self.camera.target = lerped.1;
-    //     if self.camera.camera_animator.time >= 1.0 {
-    //         self.camera.camera_animator.animating = false;
-    //     }
-    // }
-    //
-    // pub fn animate(&mut self, animation_point: (Point3<i32>, Point3<i32>), speed: f32) {
-    //     // let factor = (self.camera.aspect - 1.0).max(0.0);
-    //     let factor = 1.0;
-    //     let end_eye: Point3<f32> = animation_point.0.cast().unwrap();
-    //     let end_target: Point3<f32> = animation_point.1.cast().unwrap();
-    //     self.camera.camera_animator.end_eye = Point3::new(
-    //         end_eye.x * factor,
-    //         end_eye.y + self.camera.camera_animator.height_modifier,
-    //         end_eye.z * factor,
-    //     );
-    //     self.camera.camera_animator.end_target = Point3::new(
-    //         end_target.x * factor,
-    //         end_target.y + self.camera.camera_animator.height_modifier,
-    //         end_target.z * factor,
-    //     );
-    //     self.camera.camera_animator.start_eye = self.camera.eye;
-    //     self.camera.camera_animator.start_target = self.camera.target;
-    //     self.camera.camera_animator.animating = true;
-    //     self.camera.camera_animator.time = 0.0;
-    //     self.camera.camera_animator.speed = speed;
-    // }
     fn reset_input(&mut self) {
         reset_if_not_override(&mut self.is_up_pressed);
         reset_if_not_override(&mut self.is_down_pressed);
@@ -545,6 +445,65 @@ impl CameraSystem {
             MovementKey::RotateLeft => self.rotate_left = state,
             MovementKey::RotateRight => self.rotate_right = state,
         }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CameraUniform {
+    view_position: [f32; 4],
+    view_proj: [[f32; 4]; 4],
+}
+
+impl CameraUniform {
+    pub fn new() -> Self {
+        Self {
+            view_position: [0.0; 4],
+            view_proj: cgmath::Matrix4::identity().into(),
+        }
+    }
+
+    pub fn update_view_proj(&mut self, camera: &Camera) {
+        self.view_position = camera.eye.to_homogeneous().into();
+        self.view_proj = (OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix()).into();
+    }
+}
+
+impl Default for CameraUniform {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct CameraSystem {
+    pub camera_uniform: CameraUniform,
+    pub camera_buffer: Buffer,
+}
+
+impl CameraSystem {
+    pub fn new(gfx: &mut Graphics, camera: &Camera) -> Self {
+        let mut camera_uniform = CameraUniform::new();
+        camera_uniform.update_view_proj(camera);
+        let camera_buffer = Buffer::new_init(
+            &[camera_uniform],
+            gfx.get_device_mut(),
+            BufferType::UniformBuffer(UniformParameters::default()),
+        );
+
+        log::warn!("Shader");
+        Self {
+            camera_buffer,
+            camera_uniform,
+        }
+    }
+
+    pub fn update_camera(&mut self, camera: &Camera, rc: &mut RenderContext) {
+        self.camera_uniform.update_view_proj(camera);
+        rc.queue.write_buffer(
+            &self.camera_buffer.buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera_uniform]),
+        );
     }
 }
 fn reset_if_not_override(v: &mut MovementPress) {
@@ -575,26 +534,22 @@ pub fn normalize_and_map_camera_height(x: i64, a: i64, b: i64, start: f32, end: 
     start + (end * 2.0) * normalized
 }
 
-impl GpuBindable for CameraSystem {
-    fn get_bind_group_layout(&self) -> &BindGroupLayout {
-        &self.camera_buffer.bind_group_layout
-    }
-}
-
 impl System for CameraSystem {
-    fn get_system_name(&self) -> String {
-        "Camera System".to_string()
+    fn run(&mut self, world: Ref<'_, World>, rc: &mut RenderContext, dt: std::time::Duration) {
+        world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
+            camera.update_camera(dt);
+            self.update_camera(camera, rc);
+            camera_animator.update(dt.as_secs_f32(), camera);
+        });
     }
 
-    fn register(self, resources: &mut crate::core::resource::Resources) {
-        let type_id = TypeId::of::<Self>();
-
-        let bind_group = self.camera_buffer.bind_group.clone();
-        let bind_group_layout = self.get_bind_group_layout().clone();
-        resources.resource_map.insert(type_id, Box::new(self));
-        resources
-            .bind_group_layouts
-            .insert(type_id, bind_group_layout);
-        resources.bind_groups.insert(type_id, bind_group);
+    fn get_buffer(&self) -> Buffer {
+        self.camera_buffer.clone()
     }
+    // fn register(self, resources: &mut crate::core::resource::Resources) {
+    //     let type_id = TypeId::of::<Self>();
+    //
+    //     resources.buffers.insert(self.camera_buffer.clone());
+    //     resources.resource_map.insert(type_id, Box::new(self));
+    // }
 }

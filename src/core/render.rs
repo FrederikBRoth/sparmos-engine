@@ -14,6 +14,7 @@ use crate::{
         post_processing::PostProcessHandler,
         texture::{Texture, TextureSampleView},
     },
+    systems::compute::Compute,
 };
 
 pub struct RenderContext {
@@ -54,8 +55,8 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
     fn draw_scene(&mut self, _backend: &DeviceBackend, engine: &Engine, world: &World) {
         let scene = &engine.render_context.gpu_objects;
         let mut bind_group_id = 0;
-        for (_name, bind_group) in engine.resources.bind_groups.iter() {
-            self.set_bind_group(bind_group_id, bind_group, &[]);
+        for bind_group in engine.resources.get_bind_groups().iter() {
+            self.set_bind_group(bind_group_id, *bind_group, &[]);
             bind_group_id += 1;
         }
 
@@ -99,8 +100,8 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             }
         });
         let mut bind_group_id = 0;
-        for (_name, bind_group) in engine.resources.bind_groups.iter() {
-            self.set_bind_group(bind_group_id, bind_group, &[]);
+        for bind_group in engine.resources.get_bind_groups().iter() {
+            self.set_bind_group(bind_group_id, *bind_group, &[]);
             bind_group_id += 1;
         }
 
@@ -138,8 +139,8 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
         });
 
         let mut bind_group_id = 0;
-        for (_name, bind_group) in engine.resources.bind_groups.iter() {
-            self.set_bind_group(bind_group_id, bind_group, &[]);
+        for bind_group in engine.resources.get_bind_groups().iter() {
+            self.set_bind_group(bind_group_id, *bind_group, &[]);
             bind_group_id += 1;
         }
         world.query::<&ComputeRenderable>(|mut query| {
@@ -187,6 +188,7 @@ pub struct GpuObjects {
     pub textures: SlotMap<TextureHandle, Texture>,
     pub materials: SlotMap<MaterialHandle, Material>,
     pub material_lookup: HashMap<MaterialKey, MaterialHandle>,
+    pub computes: SlotMap<ComputeHandle, Compute>,
     pub compute_renderings: SlotMap<ComputeRenderingHandle, ComputeRendering>,
 
     pub compute_rendering_lookup: HashMap<ComputeRenderingKey, ComputeRenderingHandle>,
@@ -211,6 +213,7 @@ impl GpuObjects {
             materials: SlotMap::with_key(),
             meshes: SlotMap::with_key(),
             textures: SlotMap::with_key(),
+            computes: SlotMap::with_key(),
             material_lookup: HashMap::new(),
 
             compute_renderings: SlotMap::with_key(),
@@ -226,5 +229,13 @@ impl GpuObjects {
         key: &ComputeRenderingKey,
     ) -> Option<ComputeRenderingHandle> {
         self.compute_rendering_lookup.get(key).copied()
+    }
+
+    pub fn get_compute_mut(&mut self, handle: ComputeHandle) -> Option<&mut Compute> {
+        self.computes.get_mut(handle)
+    }
+
+    pub fn add_compute(&mut self, compute: Compute) -> ComputeHandle {
+        self.computes.insert(compute)
     }
 }

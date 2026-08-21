@@ -7,8 +7,8 @@ use crate::{
     application::graphics::Graphics,
     core::{
         buffer::{Buffer, BufferType, StorageParameters, UniformParameters},
+        engine::System,
         render::{ComputeHandle, RenderContext},
-        resource::System,
     },
 };
 
@@ -117,10 +117,10 @@ impl<'a> ComputeBuilder<'a> {
         );
         self.gfx
             .engine
-            .resources
-            .get_system_mut::<ComputeSystem>()
-            .unwrap()
-            .add(compute)
+            .render_context
+            .gpu_objects
+            .computes
+            .insert(compute)
     }
 }
 
@@ -208,36 +208,5 @@ impl Compute {
 
     pub fn result_as<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(&self) -> &[T] {
         bytemuck::cast_slice(&self.data)
-    }
-}
-
-pub struct ComputeSystem {
-    computes: SlotMap<ComputeHandle, Compute>,
-}
-
-impl ComputeSystem {
-    pub fn get(&mut self, handle: ComputeHandle) -> Option<&mut Compute> {
-        self.computes.get_mut(handle)
-    }
-
-    pub fn add(&mut self, compute: Compute) -> ComputeHandle {
-        self.computes.insert(compute)
-    }
-
-    pub fn new() -> Self {
-        Self {
-            computes: SlotMap::with_key(),
-        }
-    }
-}
-
-impl System for ComputeSystem {
-    fn get_system_name(&self) -> String {
-        todo!()
-    }
-
-    fn register(self, resources: &mut crate::core::resource::Resources) {
-        let type_id = TypeId::of::<Self>();
-        resources.resource_map.insert(type_id, Box::new(self));
     }
 }

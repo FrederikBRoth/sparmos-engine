@@ -1,4 +1,10 @@
-use std::{any::Any, collections::HashMap, time::Duration};
+use std::{
+    any::Any,
+    cell::{Ref, RefCell},
+    collections::HashMap,
+    rc::Rc,
+    time::Duration,
+};
 
 use crate::{
     audio::{
@@ -6,6 +12,8 @@ use crate::{
         synth::Sound,
     },
     core::{
+        buffer::Buffer,
+        entities::World,
         geometry::Mesh,
         instance::InstanceControllerTrait,
         pipelines::Material,
@@ -13,6 +21,31 @@ use crate::{
         resource::Resources,
     },
 };
+pub trait System {
+    fn run(&mut self, world: Ref<'_, World>, resources: &mut RenderContext, dt: Duration);
+    fn get_buffer(&self) -> Buffer;
+}
+
+impl Systems {
+    pub fn add<T: System + 'static>(&mut self, system: T) {
+        self.systems.push(Box::new(system));
+    }
+
+    pub fn run_all(
+        &mut self,
+        world: &mut Rc<RefCell<World>>,
+        resources: &mut RenderContext,
+        dt: Duration,
+    ) {
+        for system in &mut self.systems {
+            system.run(world.borrow(), resources, dt);
+        }
+    }
+}
+
+pub struct Systems {
+    pub(crate) systems: Vec<Box<dyn System>>,
+}
 
 pub struct EngineTime {
     pub(crate) frame_count: u32,
@@ -35,6 +68,7 @@ impl EngineTime {
             self.frame_count = 0;
             self.time_acc = std::time::Duration::ZERO;
         }
+        self.dt = delta_time;
     }
 
     pub(crate) fn dt(&self) -> Duration {
@@ -68,6 +102,7 @@ pub struct Engine {
     pub resources: Resources,
     pub render_context: RenderContext,
     pub arguments: Arguments,
+    pub systems: Systems,
     pub audio_handler: Option<AudioHandler>,
     pub audio_triggers: Option<HashMap<AudioTrigger, Sound>>,
 }

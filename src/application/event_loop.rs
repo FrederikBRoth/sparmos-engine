@@ -10,7 +10,7 @@ use winit::{
 use crate::{
     application::state::{Game, State},
     core::render::ComputeHandle,
-    systems::compute::{ComputeSystem, ReadbackState},
+    systems::compute::ReadbackState,
 };
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -178,18 +178,17 @@ where
 
                     EngineEvent::ComputeResult(package) => {
                         let state = self.state.as_mut().unwrap();
-                        if let Some(computes) = state
+                        let compute = state
                             .graphics
                             .engine
-                            .resources
-                            .get_system_mut::<ComputeSystem>()
-                        {
-                            let compute = computes.get(package.handle).unwrap();
-                            compute.read_result(package.data);
-                            compute.temp_buffer.as_ref().unwrap().unmap();
-                            compute.readback_status = ReadbackState::Available;
-                            // println!("tawd");
-                        }
+                            .render_context
+                            .gpu_objects
+                            .get_compute_mut(package.handle)
+                            .unwrap();
+                        compute.read_result(package.data);
+                        compute.temp_buffer.as_ref().unwrap().unmap();
+                        compute.readback_status = ReadbackState::Available;
+                        // println!("tawd");
                     }
                 }
             }
@@ -241,33 +240,32 @@ where
 
                 state.render(dt, game);
 
-                if let Some(computes) = state
+                state
                     .graphics
-                    .engine
-                    .resources
-                    .get_system_mut::<ComputeSystem>()
-                {
-                    state
-                        .graphics
-                        .world
-                        .borrow()
-                        .query::<&ComputeHandle>(|mut handle| {
-                            for compute_handle in handle.iter() {
-                                let compute = computes.get(*compute_handle).unwrap();
-                                match compute.readback_status {
-                                    ReadbackState::NoReadback | ReadbackState::Pending => continue,
-                                    ReadbackState::Available => {
-                                        compute.readback_status = ReadbackState::Pending;
-                                        readback(
-                                            &compute.temp_buffer.as_ref().unwrap(),
-                                            *compute_handle,
-                                            &self.proxy.clone().unwrap(),
-                                        );
-                                    }
+                    .world
+                    .borrow()
+                    .query::<&ComputeHandle>(|mut handle| {
+                        for compute_handle in handle.iter() {
+                            let compute = state
+                                .graphics
+                                .engine
+                                .render_context
+                                .gpu_objects
+                                .get_compute_mut(*compute_handle)
+                                .unwrap();
+                            match compute.readback_status {
+                                ReadbackState::NoReadback | ReadbackState::Pending => continue,
+                                ReadbackState::Available => {
+                                    compute.readback_status = ReadbackState::Pending;
+                                    readback(
+                                        &compute.temp_buffer.as_ref().unwrap(),
+                                        *compute_handle,
+                                        &self.proxy.clone().unwrap(),
+                                    );
                                 }
                             }
-                        });
-                }
+                        }
+                    });
                 state.update(dt);
                 let world = state.graphics.get_world();
                 let world = world.borrow();

@@ -11,9 +11,9 @@ use crate::{
         buffer::{Buffer, BufferKey, BufferType, UniformParameters},
         geometry::{Vertex, VertexBufferLayoutOwned, VertexLayoutKey},
         render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle},
+        resource::BufferHandle,
         texture::Texture,
     },
-    systems::compute::ComputeSystem,
 };
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
@@ -52,7 +52,6 @@ impl Material {
     }
 }
 
-new_key_type! { pub struct BufferHandle; }
 pub struct MaterialBuilder<'a> {
     pub(crate) graphics: &'a mut Graphics,
     pub(crate) buffers: IndexMap<u32, Buffer>,
@@ -97,10 +96,9 @@ impl<'a> MaterialBuilder<'a> {
         self.compute_render_buffer = Some(
             self.graphics
                 .engine
-                .resources
-                .get_system_mut::<ComputeSystem>()
-                .unwrap()
-                .get(handle)
+                .render_context
+                .gpu_objects
+                .get_compute_mut(handle)
                 .unwrap()
                 .render_buffer
                 .clone(),
@@ -357,7 +355,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
         self
     }
 
-    pub fn input_buffer<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+    pub fn input_data<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
         mut self,
         data: &[T],
     ) -> Self {
@@ -367,6 +365,12 @@ impl<'a> ComputeRenderingBuilder<'a> {
             BufferType::UniformBuffer(UniformParameters::default()),
         );
         self.input_buffers.push(buffer);
+        self
+    }
+
+    pub fn input_buffer(mut self, buffer: BufferHandle) -> Self {
+        let buffer = self.graphics.engine.resources.buffers.get(buffer).unwrap();
+        self.input_buffers.push(buffer.clone());
         self
     }
 
@@ -396,10 +400,9 @@ impl<'a> ComputeRenderingBuilder<'a> {
         let compute = self
             .graphics
             .engine
-            .resources
-            .get_system_mut::<ComputeSystem>()
-            .unwrap()
-            .get(self.compute)
+            .render_context
+            .gpu_objects
+            .get_compute_mut(self.compute)
             .unwrap();
 
         let render_buffer = compute.render_buffer.clone();

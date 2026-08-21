@@ -8,16 +8,18 @@ use wgpu::{Device, Queue};
 
 use crate::{
     core::{
+        buffer::Buffer,
         engine::{
             Engine,
             EngineCommandQueue::{self, AddEntity},
+            System,
         },
         entities::World,
         geometry::{ModelBuilder, Vertex},
         instance::{InstanceBuilder, RawInstance},
         pipelines::{ComputeRenderingBuilder, MaterialBuilder},
         render::{ComputeHandle, MaterialHandle, RenderContext},
-        resource::System,
+        resource::BufferHandle,
     },
     systems::compute::{ComputeBuilder, ReadbackState},
 };
@@ -28,6 +30,13 @@ pub struct Graphics {
 }
 
 impl Graphics {
+    pub(crate) fn run_all_systems(&mut self) {
+        self.engine.systems.run_all(
+            &mut self.world,
+            &mut self.engine.render_context,
+            self.engine.engine_time.dt(),
+        );
+    }
     pub fn get_world(&self) -> Rc<RefCell<World>> {
         Rc::clone(&self.world)
     }
@@ -115,7 +124,8 @@ impl Graphics {
     }
 
     pub fn add_system<T: System + 'static>(&mut self, system: T) {
-        system.register(&mut self.engine.resources);
+        self.engine.resources.buffers.insert(system.get_buffer());
+        self.engine.systems.add(system);
     }
 
     pub fn add_entity<B: DynamicBundle + 'static>(&mut self, bundle: B) -> Entity {
@@ -133,35 +143,8 @@ impl Graphics {
         }
     }
 
-    pub fn get_bindgroup<T: 'static>(&self) -> Option<&wgpu::BindGroup> {
-        self.engine.resources.bind_groups.get(&TypeId::of::<T>())
-    }
-
-    pub fn get_system<T: 'static>(&self) -> &T {
-        self.engine
-            .resources
-            .resource_map
-            .get(&TypeId::of::<T>())
-            .and_then(|system| system.downcast_ref::<T>())
-            .unwrap()
-    }
-
-    pub fn get_system_mut<T: 'static>(&mut self) -> &mut T {
-        self.engine
-            .resources
-            .resource_map
-            .get_mut(&TypeId::of::<T>())
-            .and_then(|system| system.downcast_mut::<T>())
-            .unwrap()
-    }
-
     pub(crate) fn get_bind_group_layouts(&self) -> Vec<Option<&wgpu::BindGroupLayout>> {
-        self.engine
-            .resources
-            .bind_group_layouts
-            .values()
-            .map(|resource| Some(resource))
-            .collect()
+        self.engine.resources.get_bind_group_layouts()
     }
 
     pub fn entity_query_first<B: Query>(&self, f: impl for<'a> FnOnce(<B as Query>::Item<'a>))
@@ -198,5 +181,9 @@ impl Graphics {
 
     pub fn dt(&self) -> Duration {
         self.engine.engine_time.dt()
+    }
+
+    pub fn get_buffer(&self, handle: BufferHandle) -> &Buffer {
+        self.engine.resources.buffers.get(handle).unwrap()
     }
 }

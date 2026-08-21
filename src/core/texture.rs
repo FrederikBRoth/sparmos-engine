@@ -3,8 +3,6 @@ use image::GenericImageView;
 use wgpu::{BindGroup, BindGroupLayout, Sampler, TextureView};
 use winit::dpi::PhysicalSize;
 
-use crate::core::resource::GpuBindable;
-
 #[derive(Clone)]
 pub struct Texture {
     #[allow(unused)]
@@ -20,12 +18,6 @@ pub struct TextureSampleView {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
-}
-
-impl GpuBindable for Texture {
-    fn get_bind_group_layout(&self) -> &BindGroupLayout {
-        &self.bind_group_layout
-    }
 }
 
 impl Texture {

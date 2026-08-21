@@ -4,7 +4,8 @@ use cgmath::Vector3;
 
 use crate::core::{
     buffer::{Buffer, BufferType, UniformParameters},
-    resource::{GpuBindable, Resources, System},
+    engine::System,
+    resource::Resources,
 };
 
 const MAX_LIGHTS: usize = 16;
@@ -73,26 +74,23 @@ impl LightSystem {
     }
 }
 
-impl GpuBindable for LightSystem {
-    fn get_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.storage_buffer.bind_group_layout
-    }
-}
-
 impl System for LightSystem {
-    fn get_system_name(&self) -> String {
-        "Light System".to_string()
+    fn run(
+        &mut self,
+        world: std::cell::Ref<'_, crate::core::entities::World>,
+        resources: &mut crate::core::render::RenderContext,
+        dt: std::time::Duration,
+    ) {
     }
 
-    fn register(self, resources: &mut Resources) {
-        let type_id = TypeId::of::<Self>();
-
-        let bind_group_layout = self.get_bind_group_layout().clone();
-        let bind_group = self.storage_buffer.bind_group.clone();
-        resources.resource_map.insert(type_id, Box::new(self));
-        resources
-            .bind_group_layouts
-            .insert(type_id, bind_group_layout);
-        resources.bind_groups.insert(type_id, bind_group);
+    fn get_buffer(&self) -> Buffer {
+        self.storage_buffer.clone()
     }
+
+    // fn register(self, resources: &mut Resources) {
+    //     let type_id = TypeId::of::<Self>();
+    //
+    //     resources.buffers.insert(self.storage_buffer.clone());
+    //     resources.resource_map.insert(type_id, Box::new(self));
+    // }
 }
