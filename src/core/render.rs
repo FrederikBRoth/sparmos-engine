@@ -63,14 +63,15 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
 
         world.query::<&Model>(|mut query| {
             for model in query.iter() {
-                let material = &scene.materials[model.material];
                 let instance_controller = &scene.instance_controllers[model.instance];
 
-                self.set_pipeline(&material.pipeline);
                 for (mesh, texture) in model.meshes.iter().cloned() {
                     bind_group_id = pre_id;
 
+                    let material = &scene.materials[model.materials[&mesh]];
+                    self.set_pipeline(&material.pipeline);
                     let mesh = &scene.meshes[mesh];
+
                     if let Some(texture_handle) = texture {
                         let texture = &scene.textures[texture_handle.clone()];
                         self.set_bind_group(bind_group_id, &texture.bind_group, &[]);

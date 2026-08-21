@@ -1,13 +1,21 @@
-use ahash::AHashMap;
+use ahash::{AHashMap, HashMap, HashMapExt};
+use egui::util::hash;
 use std::{
     io::{BufReader, Cursor},
     mem,
 };
+use tobj::LoadError::ColorParseError;
 use wgpu::util::DeviceExt;
 
-use crate::core::{
-    render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext, TextureHandle},
-    texture::Texture,
+use crate::{
+    application::graphics::Graphics,
+    core::{
+        instance::{self, GpuInstance},
+        render::{
+            InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext, TextureHandle,
+        },
+        texture::Texture,
+    },
 };
 
 pub trait Vertex {
@@ -227,13 +235,67 @@ impl Mesh {
 
 //Models can contain multiple meshes each with (potentially)
 pub struct ModelBuilder<'a> {
+    pub(crate) gfx: &'a mut Graphics,
     pub(crate) data: &'a [u8],
+    pub(crate) mtl_data: Option<&'a [u8]>,
+    pub(crate) texture_material: Option<MaterialHandle>,
+    pub(crate) primitive_material: Option<MaterialHandle>,
+    pub(crate) instance: Option<InstanceControllerHandle>,
+}
+
+impl<'a> ModelBuilder<'a> {
+    pub(crate) fn new(gfx: &'a mut Graphics) -> Self {
+        ModelBuilder {
+            gfx,
+            data: &[],
+            mtl_data: None,
+            texture_material: None,
+            primitive_material: None,
+            instance: None,
+        }
+    }
+
+    pub fn model(mut self, data: &'a [u8]) -> Self {
+        self.data = data;
+        self
+    }
+
+    pub fn material(mut self, data: &'a [u8]) -> Self {
+        self.mtl_data = Some(data);
+        self
+    }
+
+    pub fn texture_pipeline(mut self, handle: MaterialHandle) -> Self {
+        self.texture_material = Some(handle);
+        self
+    }
+    pub fn primitive_pipeline(mut self, handle: MaterialHandle) -> Self {
+        self.primitive_material = Some(handle);
+        self
+    }
+
+    pub fn instances(mut self, instance: InstanceControllerHandle) -> Self {
+        self.instance = Some(instance);
+        self
+    }
+
+    pub fn build(mut self) -> Model {
+        let model = Model::load_obj(
+            self.data,
+            self.mtl_data,
+            &mut self.gfx,
+            self.texture_material,
+            self.primitive_material,
+            self.instance,
+        );
+        model.unwrap()
+    }
 }
 
 pub struct Model {
     pub meshes: Vec<(MeshHandle, Option<TextureHandle>)>,
     pub instance: InstanceControllerHandle,
-    pub material: MaterialHandle,
+    pub materials: HashMap<MeshHandle, MaterialHandle>,
 }
 
 #[derive(Debug)]
@@ -246,9 +308,10 @@ impl Model {
     pub fn load_obj(
         obj_data: &[u8],
         mtl_data: Option<&[u8]>,
-        rc: &mut RenderContext,
-        material_handle: MaterialHandle,
-        instance_handle: InstanceControllerHandle,
+        gfx: &mut Graphics,
+        textured_material_handle: Option<MaterialHandle>,
+        primitive_material_handle: Option<MaterialHandle>,
+        instance_handle: Option<InstanceControllerHandle>,
     ) -> Option<Self> {
         let obj_cursor = Cursor::new(obj_data);
         let mut obj_reader = BufReader::new(obj_cursor);
@@ -273,10 +336,10 @@ impl Model {
         let mut texture_list = Vec::<TextureHandle>::new();
         if let Some(materials) = materials.ok() {
             for material in materials {
-                let texture_handle = rc.gpu_objects.textures.insert(
+                let texture_handle = gfx.engine.render_context.gpu_objects.textures.insert(
                     Texture::from_color(
-                        &rc.device,
-                        &rc.queue,
+                        &gfx.get_device(),
+                        &gfx.get_queue(),
                         material.diffuse.unwrap(),
                         Some(material.name.as_str()),
                     )
@@ -287,6 +350,7 @@ impl Model {
             }
         };
 
+        let mut materials = HashMap::new();
         for model in models {
             println!(
                 "name: {:?}, material_id: {:?}, vertices: {}, indices: {}",
@@ -304,24 +368,32 @@ impl Model {
                 None
             };
             if model.mesh.texcoords.is_empty() {
-                vertices.push((
-                    Primitive::try_from(model).unwrap().make_mb(rc),
-                    texture_handle,
-                ));
+                let mesh_handle = Primitive::try_from(model)
+                    .unwrap()
+                    .make_mb(gfx.get_render_context_mut());
+                vertices.push((mesh_handle, texture_handle));
+                let material = primitive_material_handle.unwrap();
+                materials.insert(mesh_handle, material);
             } else {
-                vertices.push((
-                    Textured::try_from(model).unwrap().make_mb(rc),
-                    texture_handle,
-                ));
+                let mesh_handle = Textured::try_from(model)
+                    .unwrap()
+                    .make_mb(gfx.get_render_context_mut());
+                vertices.push((mesh_handle, texture_handle));
+                let material = textured_material_handle.unwrap();
+                materials.insert(mesh_handle, material);
             }
         }
 
-        println!("material length: {}", texture_list.len());
-        println!("Vertex length: {}", vertices.len());
+        //creates default handle for instances:
+        let instance_handle = if let Some(handle) = instance_handle {
+            handle
+        } else {
+            gfx.instances::<GpuInstance>().build()
+        };
         Some(Self {
             meshes: vertices,
             instance: instance_handle,
-            material: material_handle,
+            materials: materials,
         })
     }
 }

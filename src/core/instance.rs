@@ -178,6 +178,7 @@ pub trait RawInstance: bytemuck::Pod + bytemuck::Zeroable {
     fn to_raw(instance: &Instance) -> Self;
 }
 
+//Default instance layout in Sparmos Engine
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuInstance {

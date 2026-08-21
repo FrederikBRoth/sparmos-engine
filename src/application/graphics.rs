@@ -1,6 +1,7 @@
 use std::{any::TypeId, cell::RefCell, mem, rc::Rc, sync::Arc, time::Duration};
 
 use cgmath::Vector3;
+use dot_vox::Model;
 use hecs::{DynamicBundle, Entity, Query, QueryBorrow};
 use indexmap::IndexMap;
 use wgpu::{Device, Queue};
@@ -12,7 +13,7 @@ use crate::{
             EngineCommandQueue::{self, AddEntity},
         },
         entities::World,
-        geometry::Vertex,
+        geometry::{ModelBuilder, Vertex},
         instance::{InstanceBuilder, RawInstance},
         pipelines::{ComputeRenderingBuilder, MaterialBuilder},
         render::{ComputeHandle, MaterialHandle, RenderContext},
@@ -88,6 +89,10 @@ impl Graphics {
             phantom_data: Default::default(),
             instances: vec![],
         }
+    }
+
+    pub fn model(&mut self) -> ModelBuilder<'_> {
+        ModelBuilder::new(self)
     }
 
     pub fn compute<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
