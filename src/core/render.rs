@@ -55,7 +55,7 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
     fn draw_scene(&mut self, _backend: &DeviceBackend, engine: &Engine, world: &World) {
         let scene = &engine.render_context.gpu_objects;
         let mut bind_group_id = 0;
-        for bind_group in engine.resources.get_bind_groups().iter() {
+        for bind_group in engine.systems.get_bind_groups().iter() {
             self.set_bind_group(bind_group_id, *bind_group, &[]);
             bind_group_id += 1;
         }
@@ -100,7 +100,7 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             }
         });
         let mut bind_group_id = 0;
-        for bind_group in engine.resources.get_bind_groups().iter() {
+        for bind_group in engine.systems.get_bind_groups().iter() {
             self.set_bind_group(bind_group_id, *bind_group, &[]);
             bind_group_id += 1;
         }
@@ -139,7 +139,7 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
         });
 
         let mut bind_group_id = 0;
-        for bind_group in engine.resources.get_bind_groups().iter() {
+        for bind_group in engine.systems.get_bind_groups().iter() {
             self.set_bind_group(bind_group_id, *bind_group, &[]);
             bind_group_id += 1;
         }

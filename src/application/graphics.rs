@@ -1,7 +1,6 @@
-use std::{any::TypeId, cell::RefCell, mem, rc::Rc, sync::Arc, time::Duration};
+use std::{cell::RefCell, mem, rc::Rc, sync::Arc, time::Duration};
 
 use cgmath::Vector3;
-use dot_vox::Model;
 use hecs::{DynamicBundle, Entity, Query, QueryBorrow};
 use indexmap::IndexMap;
 use wgpu::{Device, Queue};
@@ -16,7 +15,7 @@ use crate::{
         },
         entities::World,
         geometry::{ModelBuilder, Vertex},
-        instance::{InstanceBuilder, RawInstance},
+        instance::{DefaultInstanceLayout, InstanceBuilder, RawInstance},
         pipelines::{ComputeRenderingBuilder, MaterialBuilder},
         render::{ComputeHandle, MaterialHandle, RenderContext},
         resource::BufferHandle,
@@ -89,11 +88,15 @@ impl Graphics {
             compute_render_buffer: None,
         }
     }
+    pub fn instances(&mut self) -> InstanceBuilder<'_, DefaultInstanceLayout> {
+        self.instances_typed::<DefaultInstanceLayout>()
+    }
 
-    pub fn instances<I: RawInstance>(&mut self) -> InstanceBuilder<'_, I> {
+    pub fn instances_typed<I: RawInstance>(&mut self) -> InstanceBuilder<'_, I> {
         InstanceBuilder::<I> {
             gfx: self,
             origin: Vector3::new(0.0, 0.0, 0.0),
+            global_size: 1.0,
             template: None,
             phantom_data: Default::default(),
             instances: vec![],
@@ -124,7 +127,6 @@ impl Graphics {
     }
 
     pub fn add_system<T: System + 'static>(&mut self, system: T) {
-        self.engine.resources.buffers.insert(system.get_buffer());
         self.engine.systems.add(system);
     }
 
@@ -144,7 +146,7 @@ impl Graphics {
     }
 
     pub(crate) fn get_bind_group_layouts(&self) -> Vec<Option<&wgpu::BindGroupLayout>> {
-        self.engine.resources.get_bind_group_layouts()
+        self.engine.systems.get_bind_group_layouts()
     }
 
     pub fn entity_query_first<B: Query>(&self, f: impl for<'a> FnOnce(<B as Query>::Item<'a>))
@@ -185,5 +187,29 @@ impl Graphics {
 
     pub fn get_buffer(&self, handle: BufferHandle) -> &Buffer {
         self.engine.resources.buffers.get(handle).unwrap()
+    }
+
+    pub fn get_buffer_by_register(&self, name: &str) -> BufferHandle {
+        self.engine.resources.named_buffers[name]
+    }
+
+    pub fn update_buffer<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable>(
+        &mut self,
+        handle: BufferHandle,
+        data: &[T],
+    ) {
+        let buffer = self.get_buffer(handle);
+        buffer.update(self.get_queue(), data);
+    }
+
+    pub fn register_buffer(&mut self, buffer: Buffer, name: &str) -> BufferHandle {
+        let map = &mut self.engine.resources.named_buffers;
+        if !map.contains_key(name) {
+            let handle = self.engine.resources.buffers.insert(buffer);
+            map.insert(name.to_string(), handle.clone());
+            handle
+        } else {
+            map[name]
+        }
     }
 }

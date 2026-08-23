@@ -21,7 +21,7 @@ where
     phantom: PhantomData<T>,
 }
 pub trait InstanceControllerTrait {
-    fn update_single(&mut self, queue: &wgpu::Queue);
+    fn update(&mut self, queue: &wgpu::Queue);
 
     fn buffer(&self) -> &wgpu::Buffer;
     fn layout(&self) -> &VertexBufferLayoutOwned;
@@ -34,7 +34,7 @@ impl<T> InstanceControllerTrait for InstanceController<T>
 where
     T: RawInstance,
 {
-    fn update_single(&mut self, queue: &wgpu::Queue) {
+    fn update(&mut self, queue: &wgpu::Queue) {
         self.pending.clear();
 
         self.pending.extend(
@@ -181,7 +181,7 @@ pub trait RawInstance: bytemuck::Pod + bytemuck::Zeroable {
 //Default instance layout in Sparmos Engine
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct GpuInstance {
+pub struct DefaultInstanceLayout {
     pub position: [f32; 3],
     pub scale: f32,
     pub rotation: [f32; 4], // quaternion
@@ -189,12 +189,12 @@ pub struct GpuInstance {
     _pad: f32, // alignment (important!)
 }
 
-impl RawInstance for GpuInstance {
+impl RawInstance for DefaultInstanceLayout {
     fn layout() -> VertexBufferLayoutOwned {
         use std::mem;
 
         VertexBufferLayoutOwned {
-            array_stride: mem::size_of::<GpuInstance>() as wgpu::BufferAddress,
+            array_stride: mem::size_of::<DefaultInstanceLayout>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: vec![
                 // position + scale
@@ -220,7 +220,7 @@ impl RawInstance for GpuInstance {
     }
 
     fn to_raw(instance: &Instance) -> Self {
-        GpuInstance {
+        DefaultInstanceLayout {
             position: instance.position.into(),
             scale: instance.scale,
             rotation: instance.rotation.into(), // must be quaternion
@@ -335,7 +335,7 @@ pub enum InstanceTemplate {
 }
 
 impl InstanceTemplate {
-    pub fn get_instances(&self, origin: Vector3<f32>) -> Vec<Instance> {
+    pub fn get_instances(&self, origin: Vector3<f32>, _size: f32) -> Vec<Instance> {
         let positions: Vec<Vector3<f32>> = match self {
             InstanceTemplate::GridX(size) => {
                 let y = size.x as u32;
@@ -466,6 +466,7 @@ pub struct InstanceBuilder<'a, T: RawInstance> {
     pub(crate) template: Option<InstanceTemplate>,
     pub(crate) phantom_data: PhantomData<T>,
     pub(crate) instances: Vec<Instance>,
+    pub(crate) global_size: f32,
 }
 
 impl<'a, T: RawInstance> InstanceBuilder<'a, T> {
@@ -482,15 +483,19 @@ impl<'a, T: RawInstance> InstanceBuilder<'a, T> {
         self.origin = origin;
         self
     }
+    pub fn scale(mut self, scale: f32) -> Self {
+        self.global_size = scale;
+        self
+    }
 
     pub fn build(self) -> InstanceControllerHandle {
         let instances = if let Some(template) = self.template {
-            template.get_instances(self.origin)
+            template.get_instances(self.origin, self.global_size)
         } else {
             if !self.instances.is_empty() {
                 self.instances
             } else {
-                InstanceTemplate::Single.get_instances(self.origin)
+                InstanceTemplate::Single.get_instances(self.origin, self.global_size)
             }
         };
         let mut raw = Vec::with_capacity(instances.len());

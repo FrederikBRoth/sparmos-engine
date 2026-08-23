@@ -1,16 +1,13 @@
 use ahash::{AHashMap, HashMap, HashMapExt};
-use egui::util::hash;
 use std::{
     io::{BufReader, Cursor},
     mem,
 };
-use tobj::LoadError::ColorParseError;
 use wgpu::util::DeviceExt;
 
 use crate::{
     application::graphics::Graphics,
     core::{
-        instance::{self, GpuInstance},
         render::{
             InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext, TextureHandle,
         },
@@ -162,7 +159,7 @@ impl Vertex for Textured {
                 wgpu::VertexAttribute {
                     offset: mem::size_of::<[f32; 5]>() as wgpu::BufferAddress,
                     shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x2,
+                    format: wgpu::VertexFormat::Float32x3,
                 },
             ],
         }
@@ -388,7 +385,7 @@ impl Model {
         let instance_handle = if let Some(handle) = instance_handle {
             handle
         } else {
-            gfx.instances::<GpuInstance>().build()
+            gfx.instances().build()
         };
         Some(Self {
             meshes: vertices,

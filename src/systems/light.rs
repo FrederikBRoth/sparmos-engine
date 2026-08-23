@@ -18,7 +18,7 @@ pub struct LightUniform {
     _padding: u32,
     color: [f32; 3],
     // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
-    _padding2: u32,
+    pub intensity: f32,
 }
 
 #[repr(C)]
@@ -32,6 +32,7 @@ pub struct LightBlock {
 pub struct Light {
     pub position: Vector3<f32>,
     pub color: Vector3<f32>,
+    pub intensity: f32,
 }
 
 impl Light {
@@ -40,7 +41,7 @@ impl Light {
             position: self.position.into(),
             _padding: 0,
             color: self.color.into(),
-            _padding2: 0,
+            intensity: self.intensity,
         }
     }
 
@@ -83,8 +84,8 @@ impl System for LightSystem {
     ) {
     }
 
-    fn get_buffer(&self) -> Buffer {
-        self.storage_buffer.clone()
+    fn get_buffer(&self) -> &Buffer {
+        &self.storage_buffer
     }
 
     // fn register(self, resources: &mut Resources) {

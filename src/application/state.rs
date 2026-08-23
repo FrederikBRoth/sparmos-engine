@@ -217,6 +217,8 @@ impl State {
         //Setup basic systems
         //Compute
 
+        gfx.shader("pbr", include_str!("../core/shaders/pbr_shader.wgsl"));
+
         // post_processing.new_effect(size, surface_format, Effect::ChromaticTwo);
 
         //We cant initialize audio in the browser before a user has interacted with the website.
@@ -322,7 +324,7 @@ impl State {
                             .instance_controllers
                             .get_mut(renderable.instance_controller_handle)
                             .unwrap()
-                            .update_single(&self.graphics.engine.render_context.queue);
+                            .update(&self.graphics.engine.render_context.queue);
                     }
                 });
 
@@ -335,7 +337,7 @@ impl State {
                         .instance_controllers
                         .get_mut(renderable.instance)
                         .unwrap()
-                        .update_single(&self.graphics.engine.render_context.queue);
+                        .update(&self.graphics.engine.render_context.queue);
                 }
             });
         }

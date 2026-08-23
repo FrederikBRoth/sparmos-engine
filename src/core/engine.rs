@@ -23,7 +23,7 @@ use crate::{
 };
 pub trait System {
     fn run(&mut self, world: Ref<'_, World>, resources: &mut RenderContext, dt: Duration);
-    fn get_buffer(&self) -> Buffer;
+    fn get_buffer(&self) -> &Buffer;
 }
 
 impl Systems {
@@ -40,6 +40,19 @@ impl Systems {
         for system in &mut self.systems {
             system.run(world.borrow(), resources, dt);
         }
+    }
+
+    pub(crate) fn get_bind_group_layouts(&self) -> Vec<Option<&wgpu::BindGroupLayout>> {
+        self.systems
+            .iter()
+            .map(|resource| Some(&resource.as_ref().get_buffer().bind_group_layout))
+            .collect()
+    }
+    pub(crate) fn get_bind_groups(&self) -> Vec<Option<&wgpu::BindGroup>> {
+        self.systems
+            .iter()
+            .map(|resource| Some(&resource.as_ref().get_buffer().bind_group))
+            .collect()
     }
 }
 

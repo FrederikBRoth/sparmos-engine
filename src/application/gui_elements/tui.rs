@@ -97,6 +97,19 @@ pub struct TuiWindow {
     pub border_type: TuiBorder,
 }
 
+impl Default for TuiWindow {
+    fn default() -> Self {
+        Self {
+            title: Default::default(),
+            id: Id::new("id"),
+            state: TuiWindowState {
+                pos: pos2(100.0, 200.0),
+                size: vec2(800.0, 600.0),
+            },
+            border_type: TuiBorder::SoftLines,
+        }
+    }
+}
 impl TuiWindow {
     pub fn new(id: Id, title: &str, pos: Pos2, size: Vec2, border_type: TuiBorder) -> Self {
         Self {

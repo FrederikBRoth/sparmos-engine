@@ -65,7 +65,6 @@ pub struct Buffer {
     // Multiple Buffer objects can reference the same underlying GPU buffer
     // while having different layouts/bind groups for different pipelines.
     pub buffer: wgpu::Buffer,
-
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub bind_group: wgpu::BindGroup,
 }

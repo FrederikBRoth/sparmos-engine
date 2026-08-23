@@ -543,8 +543,8 @@ impl System for CameraSystem {
         });
     }
 
-    fn get_buffer(&self) -> Buffer {
-        self.camera_buffer.clone()
+    fn get_buffer(&self) -> &Buffer {
+        &self.camera_buffer
     }
     // fn register(self, resources: &mut crate::core::resource::Resources) {
     //     let type_id = TypeId::of::<Self>();

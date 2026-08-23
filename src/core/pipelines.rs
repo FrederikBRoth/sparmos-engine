@@ -1,6 +1,5 @@
 use indexmap::IndexMap;
 use log::warn;
-use slotmap::new_key_type;
 use wgpu::{
     BindGroup, BindGroupLayout, Device, PipelineLayout, RenderPipeline, ShaderModule, TextureFormat,
 };
@@ -143,7 +142,7 @@ impl<'a> MaterialBuilder<'a> {
         }
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
 
-        for system in self.graphics.engine.resources.get_bind_group_layouts() {
+        for system in self.graphics.engine.systems.get_bind_group_layouts() {
             bind_group_layouts.push(system);
         }
         if let Some(texture) = &self.texture {
@@ -424,7 +423,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
 
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
 
-        for system in self.graphics.engine.resources.get_bind_group_layouts() {
+        for system in self.graphics.engine.systems.get_bind_group_layouts() {
             bind_group_layouts.push(system);
         }
 

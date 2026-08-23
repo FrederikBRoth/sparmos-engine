@@ -2,6 +2,7 @@ use std::sync::Arc;
 use wgpu::{BufferView, MapRangeError};
 use winit::{
     application::ApplicationHandler,
+    dpi::PhysicalSize,
     event::*,
     event_loop::{ActiveEventLoop, EventLoopProxy},
     window::{Window, WindowId},
@@ -99,6 +100,14 @@ where
             let html_canvas_element = canvas.unchecked_into();
             window_attributes = window_attributes.with_canvas(Some(html_canvas_element));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            window_attributes.inner_size = Some(winit::dpi::Size::Physical(PhysicalSize {
+                width: 1280,
+                height: 720,
+            }));
+        }
+
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         #[cfg(target_arch = "wasm32")]
@@ -163,7 +172,10 @@ where
                             let size = state.window().inner_size();
 
                             state.resize(size);
-                            game.resize(&mut state.graphics);
+                            let world = state.graphics.get_world();
+                            let world = world.borrow();
+
+                            game.resize(&mut state.graphics, world);
 
                             state.window().request_redraw();
 
