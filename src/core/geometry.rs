@@ -82,6 +82,14 @@ pub struct TexturedVertex {
     pub normal: [f32; 3],
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PbrVertex {
+    pub position: [f32; 3],
+    pub tex_coords: [f32; 2],
+    pub normal: [f32; 3],
+    pub tangent: [f32; 4],
+}
 #[derive(Debug)]
 pub struct Primitive {
     // pub num_indices: u32,
@@ -333,15 +341,13 @@ impl Model {
         let mut texture_list = Vec::<TextureHandle>::new();
         if let Some(materials) = materials.ok() {
             for material in materials {
-                let texture_handle = gfx.engine.render_context.gpu_objects.textures.insert(
-                    Texture::from_color(
-                        &gfx.get_device(),
-                        &gfx.get_queue(),
-                        material.diffuse.unwrap(),
-                        Some(material.name.as_str()),
-                    )
-                    .unwrap(),
-                );
+                let texture = gfx.texture().color(material.diffuse.unwrap()).build();
+                let texture_handle = gfx
+                    .engine
+                    .render_context
+                    .gpu_objects
+                    .textures
+                    .insert(texture);
 
                 texture_list.push(texture_handle);
             }

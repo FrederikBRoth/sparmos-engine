@@ -12,14 +12,14 @@ use crate::{
         instance::InstanceControllerTrait,
         pipelines::{ComputeRendering, ComputeRenderingKey, Material, MaterialKey},
         post_processing::PostProcessHandler,
-        texture::{Texture, TextureSampleView},
+        texture::{Texture, TextureDepth},
     },
     systems::compute::Compute,
 };
 
 pub struct RenderContext {
-    pub depth_texture: TextureSampleView,
-    pub overscan_depth_texture: TextureSampleView,
+    pub depth_texture: TextureDepth,
+    pub overscan_depth_texture: TextureDepth,
     pub shaders: HashMap<String, ShaderModule>,
     pub device: Arc<wgpu::Device>, // Logical GPU device
     pub queue: Arc<wgpu::Queue>,   // Command queue for GPU

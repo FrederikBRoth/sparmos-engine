@@ -19,6 +19,7 @@ use crate::{
         pipelines::{ComputeRenderingBuilder, MaterialBuilder},
         render::{ComputeHandle, MaterialHandle, RenderContext},
         resource::BufferHandle,
+        texture::TextureBuilder,
     },
     systems::compute::{ComputeBuilder, ReadbackState},
 };
@@ -28,6 +29,7 @@ pub struct Graphics {
     pub engine: Engine,
 }
 
+//Main API access to all functions required for rendering objects
 impl Graphics {
     pub(crate) fn run_all_systems(&mut self) {
         self.engine.systems.run_all(
@@ -211,5 +213,9 @@ impl Graphics {
         } else {
             map[name]
         }
+    }
+
+    pub fn texture(&mut self) -> TextureBuilder<'_> {
+        TextureBuilder::new(self)
     }
 }

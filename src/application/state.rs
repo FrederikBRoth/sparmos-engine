@@ -218,7 +218,12 @@ impl State {
         //Compute
 
         gfx.shader("pbr", include_str!("../core/shaders/pbr_shader.wgsl"));
+        gfx.shader("pbr2", include_str!("../core/shaders/pbr_shader2.wgsl"));
 
+        gfx.shader(
+            "pbr_textured",
+            include_str!("../core/shaders/pbr_shader_textured.wgsl"),
+        );
         // post_processing.new_effect(size, surface_format, Effect::ChromaticTwo);
 
         //We cant initialize audio in the browser before a user has interacted with the website.

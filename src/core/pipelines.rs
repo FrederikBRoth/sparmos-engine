@@ -105,15 +105,13 @@ impl<'a> MaterialBuilder<'a> {
         self
     }
 
-    pub fn texture_from_color(mut self, color: [f32; 3], label: Option<&str>) -> Self {
-        let texture = Texture::from_color(
-            &self.graphics.engine.render_context.device,
-            &self.graphics.engine.render_context.queue,
-            color,
-            label,
-        )
-        .unwrap();
+    pub fn texture_from_color(mut self, color: [f32; 3]) -> Self {
+        let texture = self.graphics.texture().color(color).build();
+        self.texture = Some(texture);
+        self
+    }
 
+    pub fn texture(mut self, texture: Texture) -> Self {
         self.texture = Some(texture);
         self
     }
