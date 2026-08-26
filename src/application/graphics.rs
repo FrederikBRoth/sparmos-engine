@@ -84,7 +84,7 @@ impl Graphics {
         MaterialBuilder {
             graphics: self,
             buffers: IndexMap::new(),
-            texture: None,
+            textures: vec![],
             shader: String::new(),
             vertex_layout: V::layout(),
             instance_layout: I::layout(),

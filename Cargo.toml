@@ -32,6 +32,7 @@ indexmap = "2.13"
 hecs = "0.11"
 slotmap = "1.1"
 cpal = { version = "0.18", features = ["wasm-bindgen"] }
+half = "2"
 heapless = "0.9"
 midly = "0.5"
 tokio = { version = "1.53", features = ["rt", "sync"] }
@@ -42,7 +43,7 @@ tobj = "4.0.5"
 [dependencies.image]
 version = "0.25"
 default-features = false
-features = ["png", "jpeg"]
+features = ["png", "jpeg", "hdr"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3.4", features = ["wasm_js"] }

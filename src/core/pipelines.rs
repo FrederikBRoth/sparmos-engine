@@ -18,7 +18,7 @@ use crate::{
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct MaterialKey {
     pub buffers: Vec<BufferKey>,
-    pub texture: Option<String>,
+    pub textures: Vec<String>,
     pub vertex_layout: VertexLayoutKey,
     pub instance_layout: VertexLayoutKey,
     pub shader: String,
@@ -29,7 +29,7 @@ pub struct Material {
     pub key: MaterialKey,
     pub pipeline_layout: PipelineLayout,
     pub pipeline: RenderPipeline,
-    pub texture: Option<Texture>,
+    pub texture: Vec<Texture>,
     pub buffers: IndexMap<u32, Buffer>,
     pub ic_buffer_layout: VertexBufferLayoutOwned,
     pub mesh_buffer_layout: VertexBufferLayoutOwned,
@@ -70,7 +70,7 @@ impl Default for PipelineConfig {
 pub struct MaterialBuilder<'a> {
     pub(crate) graphics: &'a mut Graphics,
     pub(crate) buffers: IndexMap<u32, Buffer>,
-    pub(crate) texture: Option<Texture>,
+    pub(crate) textures: Vec<Texture>,
     pub(crate) shader: String,
     pub(crate) vertex_layout: VertexBufferLayoutOwned,
     pub(crate) instance_layout: VertexBufferLayoutOwned,
@@ -80,7 +80,11 @@ pub struct MaterialBuilder<'a> {
 
 impl<'a> MaterialBuilder<'a> {
     fn key(&self) -> MaterialKey {
-        let texture_key = self.texture.as_ref().map(|texture| texture.label.clone());
+        let texture_key = self
+            .textures
+            .iter()
+            .map(|texture| texture.label.clone())
+            .collect();
 
         let buffers = self
             .buffers
@@ -90,7 +94,7 @@ impl<'a> MaterialBuilder<'a> {
 
         MaterialKey {
             buffers,
-            texture: texture_key,
+            textures: texture_key,
             vertex_layout: self.vertex_layout.key(),
             instance_layout: self.instance_layout.key(),
             shader: self.shader.clone(),
@@ -129,12 +133,12 @@ impl<'a> MaterialBuilder<'a> {
 
     pub fn texture_from_color(mut self, color: [f32; 3], label: &str) -> Self {
         let texture = self.graphics.texture(label).color(color).build();
-        self.texture = Some(texture);
+        self.textures.push(texture);
         self
     }
 
     pub fn texture(mut self, texture: Texture) -> Self {
-        self.texture = Some(texture);
+        self.textures.push(texture);
         self
     }
 
@@ -165,7 +169,7 @@ impl<'a> MaterialBuilder<'a> {
         for system in self.graphics.engine.systems.get_bind_group_layouts() {
             bind_group_layouts.push(system);
         }
-        if let Some(texture) = &self.texture {
+        for texture in self.textures.iter() {
             bind_group_layouts.push(Some(&texture.bind_group_layout));
         }
         for buffer in self.buffers.values() {
@@ -192,7 +196,7 @@ impl<'a> MaterialBuilder<'a> {
             self.graphics.engine.render_context.config.format.clone(),
             &self.graphics.engine.render_context.device,
             &render_pipeline_layout,
-            &self.texture,
+            &self.textures,
             shader,
             &self.vertex_layout,
             &self.instance_layout,
@@ -203,7 +207,7 @@ impl<'a> MaterialBuilder<'a> {
             key: key.clone(),
             pipeline,
             pipeline_layout: render_pipeline_layout,
-            texture: self.texture.clone(),
+            texture: self.textures.clone(),
             //TODO FIX
             buffers: self.buffers.clone(),
             ic_buffer_layout: self.instance_layout,
@@ -231,13 +235,13 @@ fn create_pipeline(
     format: TextureFormat,
     device: &Device,
     render_pipeline_layout: &PipelineLayout,
-    texture: &Option<Texture>,
+    texture: &[Texture],
     shader: &ShaderModule,
     mesh: &VertexBufferLayoutOwned,
     instance_controller: &VertexBufferLayoutOwned,
     config: &PipelineConfig,
 ) -> RenderPipeline {
-    if texture.is_some() {
+    if !texture.is_empty() {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&render_pipeline_layout),

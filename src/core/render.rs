@@ -121,11 +121,10 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                     &scene.instance_controllers[renderable.instance_controller_handle];
                 //binds all system bind groups
                 self.set_pipeline(&material.pipeline);
-                if let Some(texture) = &material.texture {
+                for texture in &material.texture {
                     self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
                     bind_group_id += 1;
                 }
-
                 for buffers in &material.buffers {
                     self.set_bind_group(bind_group_id, &buffers.1.bind_group, &[]);
                     bind_group_id += 1;
@@ -187,8 +186,9 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             let material = &scene.materials[skybox.material_handle];
             let mesh = &scene.meshes[skybox.mesh_handle];
             self.set_pipeline(&material.pipeline);
-            if let Some(texture) = &material.texture {
+            for texture in &material.texture {
                 self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
+                bind_group_id += 1;
             }
 
             self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));

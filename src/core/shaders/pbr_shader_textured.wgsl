@@ -38,6 +38,12 @@ var ao_map: texture_2d<f32>;
 @group(2) @binding(5)
 var texture_sampler: sampler;
 
+@group(3) @binding(0)
+
+var irradiance_map: texture_cube<f32>;
+
+@group(3) @binding(1)
+var skybox_sampler: sampler;
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) texture: vec2<f32>,
@@ -126,6 +132,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         in.world_position,
         in.world_normal,
     );
+
     //N = normalize(in.world_normal);
     let V = normalize(camera.view_pos.xyz - in.world_position);
 
@@ -163,8 +170,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         lo += (kD * albedo / PI + specular) * radiance * ndotl;
     }
 
+    let ks = fresnel_schlick_roughness(max(dot(N, V), 0.0), f0, roughness);
+    let kd = 1.0 - ks;
+    let irradiance = textureSample(irradiance_map, skybox_sampler, N).rgb;
+    let diffuse = irradiance * albedo;
+    let ambient = (kd * diffuse) * ao;
     // Tone mapping
-    let ambient = vec3<f32>(0.03) * ao * albedo;
     var color = ambient + lo;
 
     color = color / (color + vec3<f32>(1.0));
@@ -234,6 +245,10 @@ fn geometry_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32) -> f
 
 fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
     return f0 + (1.0 - f0) * pow(1.0 - cos_theta, 5.0);
+}
+
+fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
+    return f0 + (max(vec3<f32>(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
 }
 fn get_normal_from_normal_map(
     uv: vec2<f32>,
