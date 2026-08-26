@@ -1,7 +1,8 @@
 const PI: f32 = 3.141592653589793;
 struct CameraUniform {
     view_pos: vec4<f32>,
-    view_proj: mat4x4<f32>,
+    proj: mat4x4<f32>,
+    view: mat4x4<f32>,
 }
 
 @group(0) @binding(0)
@@ -90,7 +91,8 @@ fn vs_main(
     let normal = normalize(rot * model.normal);
 
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * world_pos;
+    let view_proj = camera.proj * camera.view;
+    out.clip_position = view_proj * world_pos;
     out.color = instance.color;
     out.world_normal = normal;
     out.world_position = world_pos.xyz;

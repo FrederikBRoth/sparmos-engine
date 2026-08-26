@@ -1,7 +1,8 @@
 const PI: f32 = 3.141592653589793;
 struct CameraUniform {
     view_pos: vec4<f32>,
-    view_proj: mat4x4<f32>,
+    proj: mat4x4<f32>,
+    view: mat4x4<f32>,
 }
 
 @group(0) @binding(0)
@@ -88,7 +89,8 @@ fn vs_main(
     let normal = normalize(rot * model.normal);
 
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * world_pos;
+    let view_proj = camera.proj * camera.view;
+    out.clip_position = view_proj * world_pos;
     out.color = instance.color;
     out.world_normal = normal;
     out.world_position = world_pos.xyz;
@@ -99,11 +101,8 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let albedo = pow(
-        textureSample(albedo_map, texture_sampler, in.uv).rgb,
-        vec3<f32>(2.2)
-    );
 
+    let albedo = textureSample(albedo_map, texture_sampler, in.uv).rgb;
     let metallic = textureSample(
         metallic_map,
         texture_sampler,
@@ -169,6 +168,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var color = ambient + lo;
 
     color = color / (color + vec3<f32>(1.0));
+    //linear to srgb format. Not required as wgpu does that automatically
     //color = pow(color, vec3<f32>(1.0 / 2.2));
 
     return vec4<f32>(color, 1.0);
