@@ -1,6 +1,6 @@
 use anyhow::*;
 use image::GenericImageView;
-use wgpu::{BindGroup, BindGroupLayout, Sampler, TextureFormat, TextureView};
+use wgpu::{BindGroup, BindGroupLayout, Sampler, TextureFormat};
 use winit::dpi::PhysicalSize;
 
 use crate::application::graphics::Graphics;
@@ -16,9 +16,16 @@ pub struct Texture {
 }
 
 #[derive(Clone)]
+pub enum TextureViewType {
+    D2,
+    Cube,
+}
+
+#[derive(Clone)]
 pub struct TextureDefinition {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
+    pub view_type: TextureViewType,
 }
 
 impl TextureDefinition {
@@ -71,19 +78,11 @@ impl TextureDefinition {
             },
             size,
         );
-        // let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        //     address_mode_u: wgpu::AddressMode::ClampToEdge,
-        //     address_mode_v: wgpu::AddressMode::ClampToEdge,
-        //     address_mode_w: wgpu::AddressMode::ClampToEdge,
-        //     mag_filter: wgpu::FilterMode::Linear,
-        //     min_filter: wgpu::FilterMode::Linear,
-        //     mipmap_filter: wgpu::MipmapFilterMode::Linear,
-        //     anisotropy_clamp: 8,
-        //
-        //     ..Default::default()
-        // });
-        // let (bind_group_layout, bind_group) = create_bind_group_and_layout(device, &view, &sampler);
-        Ok(Self { texture, view })
+        Ok(Self {
+            texture,
+            view,
+            view_type: TextureViewType::D2,
+        })
     }
 
     pub fn from_color(
@@ -129,19 +128,85 @@ impl TextureDefinition {
             },
             size,
         );
-        // let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        //     address_mode_u: wgpu::AddressMode::ClampToEdge,
-        //     address_mode_v: wgpu::AddressMode::ClampToEdge,
-        //     address_mode_w: wgpu::AddressMode::ClampToEdge,
-        //     mag_filter: wgpu::FilterMode::Linear,
-        //     min_filter: wgpu::FilterMode::Linear,
-        //     mipmap_filter: wgpu::MipmapFilterMode::Linear,
-        //     anisotropy_clamp: 8,
-        //
-        //     ..Default::default()
-        // });
-        // let (bind_group_layout, bind_group) = create_bind_group_and_layout(device, &view, &sampler);
-        Ok(Self { texture, view })
+        Ok(Self {
+            texture,
+            view,
+            view_type: TextureViewType::D2,
+        })
+    }
+
+    pub fn from_cubemap(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        images: [image::DynamicImage; 6],
+        label: Option<&str>,
+        format: wgpu::TextureFormat,
+    ) -> Result<Self> {
+        let rgba_images: Vec<_> = images.iter().map(|img| img.to_rgba8()).collect();
+
+        let dimensions = images[0].dimensions();
+
+        // All six faces must have the same dimensions.
+        for img in &images {
+            if img.dimensions() != dimensions {
+                bail!("All cubemap faces must have the same dimensions");
+            }
+        }
+
+        let size = wgpu::Extent3d {
+            width: dimensions.0,
+            height: dimensions.1,
+            depth_or_array_layers: 6,
+        };
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // Upload each face into one array layer.
+        for (face, rgba) in rgba_images.iter().enumerate() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: face as u32,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(dimensions.0 * 4),
+                    rows_per_image: Some(dimensions.1),
+                },
+                wgpu::Extent3d {
+                    width: dimensions.0,
+                    height: dimensions.1,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            ..Default::default()
+        });
+
+        Ok(Self {
+            texture,
+            view,
+            view_type: TextureViewType::Cube,
+        })
     }
 
     // pub fn create_life_texture(
@@ -322,7 +387,10 @@ fn create_bind_group_and_layout(
             visibility: wgpu::ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Texture {
                 multisampled: false,
-                view_dimension: wgpu::TextureViewDimension::D2,
+                view_dimension: match texture.view_type {
+                    TextureViewType::D2 => wgpu::TextureViewDimension::D2,
+                    TextureViewType::Cube => wgpu::TextureViewDimension::Cube,
+                },
                 sample_type: wgpu::TextureSampleType::Float { filterable: true },
             },
             count: None,
@@ -368,13 +436,15 @@ fn create_bind_group_and_layout(
 pub struct TextureBuilder<'a> {
     pub(crate) gfx: &'a mut Graphics,
     pub(crate) textures: Vec<TextureDefinition>,
+    pub(crate) label: &'a str,
 }
 
 impl<'a> TextureBuilder<'a> {
-    pub(crate) fn new(gfx: &'a mut Graphics) -> Self {
+    pub(crate) fn new(gfx: &'a mut Graphics, label: &'a str) -> Self {
         Self {
             gfx,
             textures: vec![],
+            label: label,
         }
     }
 
@@ -383,7 +453,7 @@ impl<'a> TextureBuilder<'a> {
             self.gfx.get_device(),
             self.gfx.get_queue(),
             img,
-            None,
+            Some(self.label),
             format,
         )
         .unwrap();
@@ -395,7 +465,7 @@ impl<'a> TextureBuilder<'a> {
             self.gfx.get_device(),
             self.gfx.get_queue(),
             data,
-            None,
+            Some(self.label),
             format,
         )
         .unwrap();
@@ -408,7 +478,7 @@ impl<'a> TextureBuilder<'a> {
             self.gfx.get_device(),
             self.gfx.get_queue(),
             &color,
-            None,
+            Some(self.label),
         )
         .unwrap();
         self.textures.push(texture);
@@ -433,8 +503,61 @@ impl<'a> TextureBuilder<'a> {
         let (bind_group_layout, bind_group) =
             create_bind_group_and_layout(self.gfx.get_device(), &self.textures, &sampler);
         Texture {
-            label: "sut".to_string(),
+            label: self.label.to_string(),
             texture: self.textures,
+            sampler,
+            bind_group_layout,
+            bind_group,
+        }
+    }
+
+    pub fn cubemap(self, image: &[u8]) -> Texture {
+        let img = image::load_from_memory(image).unwrap();
+        let face_size = img.width() / 4;
+
+        let faces = [
+            // +X
+            img.crop_imm(face_size * 2, face_size, face_size, face_size),
+            // -X
+            img.crop_imm(0, face_size, face_size, face_size),
+            // +Y
+            img.crop_imm(face_size, 0, face_size, face_size),
+            // -Y
+            img.crop_imm(face_size, face_size * 2, face_size, face_size),
+            // +Z
+            img.crop_imm(face_size, face_size, face_size, face_size),
+            // -Z
+            img.crop_imm(face_size * 3, face_size, face_size, face_size),
+        ];
+
+        let cubemap = TextureDefinition::from_cubemap(
+            self.gfx.get_device(),
+            self.gfx.get_queue(),
+            faces,
+            Some(self.label),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
+        .unwrap();
+        let textures = vec![cubemap];
+        let sampler = self
+            .gfx
+            .get_device()
+            .create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Linear,
+                anisotropy_clamp: 8,
+
+                ..Default::default()
+            });
+        let (bind_group_layout, bind_group) =
+            create_bind_group_and_layout(self.gfx.get_device(), &textures, &sampler);
+        Texture {
+            label: self.label.to_string(),
+            texture: textures,
             sampler,
             bind_group_layout,
             bind_group,

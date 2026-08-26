@@ -46,11 +46,27 @@ impl Material {
             shader,
             &self.mesh_buffer_layout,
             &self.ic_buffer_layout,
+            &PipelineConfig::default(),
         );
         self.pipeline = new_pipeline;
     }
 }
 
+pub struct PipelineConfig {
+    pub culling: Option<wgpu::Face>,
+    pub depth_enabled: Option<bool>,
+    pub depth_compare: Option<wgpu::CompareFunction>,
+}
+
+impl Default for PipelineConfig {
+    fn default() -> Self {
+        Self {
+            culling: Some(wgpu::Face::Back),
+            depth_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+        }
+    }
+}
 pub struct MaterialBuilder<'a> {
     pub(crate) graphics: &'a mut Graphics,
     pub(crate) buffers: IndexMap<u32, Buffer>,
@@ -59,6 +75,7 @@ pub struct MaterialBuilder<'a> {
     pub(crate) vertex_layout: VertexBufferLayoutOwned,
     pub(crate) instance_layout: VertexBufferLayoutOwned,
     pub(crate) compute_render_buffer: Option<Buffer>,
+    pub(crate) config: PipelineConfig,
 }
 
 impl<'a> MaterialBuilder<'a> {
@@ -105,8 +122,13 @@ impl<'a> MaterialBuilder<'a> {
         self
     }
 
-    pub fn texture_from_color(mut self, color: [f32; 3]) -> Self {
-        let texture = self.graphics.texture().color(color).build();
+    pub fn config(mut self, config: PipelineConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    pub fn texture_from_color(mut self, color: [f32; 3], label: &str) -> Self {
+        let texture = self.graphics.texture(label).color(color).build();
         self.texture = Some(texture);
         self
     }
@@ -135,7 +157,7 @@ impl<'a> MaterialBuilder<'a> {
             .gpu_objects
             .get_material(&key)
         {
-            warn!("{:?} clashes with another implemented material", key);
+            println!("{:?} clashes with another implemented material", key);
             return handle;
         }
         let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
@@ -174,6 +196,7 @@ impl<'a> MaterialBuilder<'a> {
             shader,
             &self.vertex_layout,
             &self.instance_layout,
+            &self.config,
         );
         let compute_bind = self.compute_render_buffer.map(|c| c.bind_group);
         let material = Material {
@@ -212,6 +235,7 @@ fn create_pipeline(
     shader: &ShaderModule,
     mesh: &VertexBufferLayoutOwned,
     instance_controller: &VertexBufferLayoutOwned,
+    config: &PipelineConfig,
 ) -> RenderPipeline {
     if texture.is_some() {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -240,18 +264,19 @@ fn create_pipeline(
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: config.culling,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: Texture::DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
+                depth_write_enabled: config.depth_enabled,
+                depth_compare: config.depth_compare,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
+            // depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -287,15 +312,15 @@ fn create_pipeline(
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: config.culling,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
+                depth_write_enabled: config.depth_enabled,
+                depth_compare: config.depth_compare,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),

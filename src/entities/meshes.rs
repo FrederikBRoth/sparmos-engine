@@ -67,7 +67,9 @@ const _INDICES: &[u16] = &[
     1, 3, 5,   1, 5, 7  // top
 ];
 
-use crate::core::geometry::{Primitive, PrimitiveVertex, Textured, TexturedVertex};
+use crate::core::geometry::{
+    Primitive, PrimitiveVertex, Skybox, SkyboxVertex, Textured, TexturedVertex,
+};
 
 pub enum Meshes {
     Cube,
@@ -75,6 +77,9 @@ pub enum Meshes {
 }
 
 impl Meshes {
+    pub fn create_skybox() -> Skybox {
+        new_skybox()
+    }
     pub fn create_primitive(&self) -> Primitive {
         match self {
             Meshes::Cube => new_cube(),
@@ -85,7 +90,7 @@ impl Meshes {
     pub fn create_textured(&self) -> Textured {
         match self {
             Meshes::Cube => todo!(),
-            Meshes::Sphere => create_sphere(10.0, 64, 32),
+            Meshes::Sphere => create_sphere(1.0, 64, 32),
         }
     }
 }
@@ -248,4 +253,83 @@ pub fn create_sphere(radius: f32, segments: u32, rings: u32) -> Textured {
     }
 
     Textured { vertices, indices }
+}
+
+pub fn new_skybox() -> Skybox {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    const S: f32 = 1.0;
+
+    let mut i = 0u32;
+
+    let mut push_face = |positions: [[f32; 3]; 6]| {
+        for pos in positions {
+            vertices.push(SkyboxVertex { position: pos });
+            indices.push(i);
+            i += 1;
+        }
+    };
+
+    // Front (+Z)
+    push_face([
+        [-S, -S, S],
+        [S, -S, S],
+        [S, S, S],
+        [-S, -S, S],
+        [S, S, S],
+        [-S, S, S],
+    ]);
+
+    // Back (-Z)
+    push_face([
+        [S, -S, -S],
+        [-S, -S, -S],
+        [-S, S, -S],
+        [S, -S, -S],
+        [-S, S, -S],
+        [S, S, -S],
+    ]);
+
+    // Right (+X)
+    push_face([
+        [S, -S, S],
+        [S, -S, -S],
+        [S, S, -S],
+        [S, -S, S],
+        [S, S, -S],
+        [S, S, S],
+    ]);
+
+    // Left (-X)
+    push_face([
+        [-S, -S, -S],
+        [-S, -S, S],
+        [-S, S, S],
+        [-S, -S, -S],
+        [-S, S, S],
+        [-S, S, -S],
+    ]);
+
+    // Top (+Y)
+    push_face([
+        [-S, S, S],
+        [S, S, S],
+        [S, S, -S],
+        [-S, S, S],
+        [S, S, -S],
+        [-S, S, -S],
+    ]);
+
+    // Bottom (-Y)
+    push_face([
+        [-S, -S, -S],
+        [S, -S, -S],
+        [S, -S, S],
+        [-S, -S, -S],
+        [S, -S, S],
+        [-S, -S, S],
+    ]);
+
+    Skybox { vertices, indices }
 }

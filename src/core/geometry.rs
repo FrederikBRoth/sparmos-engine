@@ -68,6 +68,12 @@ impl VertexBufferLayoutOwned {
 //Own vertex implementations. It is possible to create your own if you want
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SkyboxVertex {
+    pub position: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PrimitiveVertex {
     pub position: [f32; 3],
     pub color: [f32; 3],
@@ -90,9 +96,40 @@ pub struct PbrVertex {
     pub normal: [f32; 3],
     pub tangent: [f32; 4],
 }
+
+#[derive(Debug)]
+pub struct Skybox {
+    pub vertices: Vec<SkyboxVertex>,
+    pub indices: Vec<u32>,
+}
+impl Vertex for Skybox {
+    fn layout() -> VertexBufferLayoutOwned {
+        VertexBufferLayoutOwned {
+            array_stride: mem::size_of::<SkyboxVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: vec![wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x3,
+            }],
+        }
+    }
+}
+impl Skybox {
+    pub fn make_mb(&self, rc: &mut RenderContext) -> MeshHandle {
+        let mesh = Mesh::new(
+            &rc.device,
+            &self.vertices,
+            &self.indices,
+            self.vertices.len() as u32,
+            self.indices.len() as u32,
+        );
+
+        rc.gpu_objects.meshes.insert(mesh)
+    }
+}
 #[derive(Debug)]
 pub struct Primitive {
-    // pub num_indices: u32,
     pub vertices: Vec<PrimitiveVertex>,
     pub indices: Vec<u32>,
 }
@@ -341,7 +378,10 @@ impl Model {
         let mut texture_list = Vec::<TextureHandle>::new();
         if let Some(materials) = materials.ok() {
             for material in materials {
-                let texture = gfx.texture().color(material.diffuse.unwrap()).build();
+                let texture = gfx
+                    .texture(&material.name)
+                    .color(material.diffuse.unwrap())
+                    .build();
                 let texture_handle = gfx
                     .engine
                     .render_context

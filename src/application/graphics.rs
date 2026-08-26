@@ -14,13 +14,14 @@ use crate::{
             System,
         },
         entities::World,
-        geometry::{ModelBuilder, Vertex},
+        geometry::{ModelBuilder, Skybox, Vertex},
         instance::{DefaultInstanceLayout, InstanceBuilder, RawInstance},
-        pipelines::{ComputeRenderingBuilder, MaterialBuilder},
-        render::{ComputeHandle, MaterialHandle, RenderContext},
+        pipelines::{ComputeRenderingBuilder, MaterialBuilder, PipelineConfig},
+        render::{ComputeHandle, MaterialHandle, RenderContext, SkyboxRenderable},
         resource::BufferHandle,
-        texture::TextureBuilder,
+        texture::{Texture, TextureBuilder},
     },
+    entities::meshes::Meshes,
     systems::compute::{ComputeBuilder, ReadbackState},
 };
 
@@ -88,6 +89,7 @@ impl Graphics {
             vertex_layout: V::layout(),
             instance_layout: I::layout(),
             compute_render_buffer: None,
+            config: PipelineConfig::default(),
         }
     }
     pub fn instances(&mut self) -> InstanceBuilder<'_, DefaultInstanceLayout> {
@@ -215,7 +217,31 @@ impl Graphics {
         }
     }
 
-    pub fn texture(&mut self) -> TextureBuilder<'_> {
-        TextureBuilder::new(self)
+    pub fn texture<'a>(&'a mut self, label: &'a str) -> TextureBuilder<'a> {
+        TextureBuilder::new(self, label)
     }
+
+    pub fn add_skybox(&mut self, skybox_texture: Texture) {
+        let skybox_mesh = Meshes::create_skybox().make_mb(self.get_render_context_mut());
+        let skybox_pipeline = self
+            .material::<Skybox, DefaultInstanceLayout>()
+            .shader("skybox")
+            .config(PipelineConfig {
+                culling: None,
+                depth_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            })
+            .texture(skybox_texture)
+            .build();
+
+        let skybox_renderable = SkyboxRenderable {
+            material_handle: skybox_pipeline,
+            mesh_handle: skybox_mesh,
+        };
+        self.add_entity((skybox_renderable,));
+    }
+}
+
+pub enum Markers {
+    Skybox,
 }

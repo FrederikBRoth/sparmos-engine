@@ -40,6 +40,11 @@ impl RenderContext {
     }
 }
 
+pub struct SkyboxRenderable {
+    pub material_handle: MaterialHandle,
+    pub mesh_handle: MeshHandle,
+}
+
 pub struct ComputeRenderable {
     pub rendering_handle: ComputeRenderingHandle,
     pub mesh_handle: MeshHandle,
@@ -105,8 +110,11 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             bind_group_id += 1;
         }
 
+        let pre_id = bind_group_id;
         world.query::<&Renderable>(|mut query| {
             for renderable in query.iter() {
+                bind_group_id = pre_id;
+
                 let mesh = &scene.meshes[renderable.mesh_handle];
                 let material = &scene.materials[renderable.material_handle];
                 let instance_controller =
@@ -143,8 +151,12 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             self.set_bind_group(bind_group_id, *bind_group, &[]);
             bind_group_id += 1;
         }
+        let pre_id = bind_group_id;
+
         world.query::<&ComputeRenderable>(|mut query| {
             for renderable in query.iter() {
+                bind_group_id = pre_id;
+
                 let rendering = &scene.compute_renderings[renderable.rendering_handle];
                 let mesh = &scene.meshes[renderable.mesh_handle];
                 self.set_pipeline(&rendering.pipeline);
@@ -164,6 +176,25 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
 
                 // self.draw(0..renderable.vertex_count, 0..renderable.instance_count);
             }
+        });
+
+        let mut bind_group_id = 0;
+        for bind_group in engine.systems.get_bind_groups().iter() {
+            self.set_bind_group(bind_group_id, *bind_group, &[]);
+            bind_group_id += 1;
+        }
+        world.query_first::<&mut SkyboxRenderable>(|skybox| {
+            let material = &scene.materials[skybox.material_handle];
+            let mesh = &scene.meshes[skybox.mesh_handle];
+            self.set_pipeline(&material.pipeline);
+            if let Some(texture) = &material.texture {
+                self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
+            }
+
+            self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+
+            self.draw_indexed(0..mesh.index_count, 0, 0..1);
         });
     }
 }
