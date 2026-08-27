@@ -6,7 +6,6 @@ use std::{
 use wgpu::util::DeviceExt;
 
 use crate::{
-    
     application::graphics::Graphics,
     core::{
         render::{
@@ -381,7 +380,7 @@ impl Model {
             for material in materials {
                 let texture = gfx
                     .texture(&material.name)
-                    .color(material.diffuse.unwrap())
+                    .color(material.diffuse.unwrap_or_default())
                     .build();
                 let texture_handle = gfx
                     .engine
@@ -411,7 +410,7 @@ impl Model {
             } else {
                 None
             };
-            if model.mesh.texcoords.is_empty() {
+            if primitive_material_handle.is_some() {
                 let mesh_handle = Primitive::try_from(model)
                     .unwrap()
                     .make_mb(gfx.get_render_context_mut());

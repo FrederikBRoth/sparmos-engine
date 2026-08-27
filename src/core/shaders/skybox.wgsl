@@ -13,6 +13,13 @@ var skybox: texture_cube<f32>;
 @group(2) @binding(1)
 var skybox_sampler: sampler;
 
+struct TextureParameters {
+    values: vec4<f32>,
+};
+
+@group(2) @binding(2)
+var<uniform> texture_parameters: TextureParameters;
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) direction: vec3<f32>,
@@ -60,7 +67,7 @@ fn fs_main(
         skybox,
         skybox_sampler,
         normalize(input.direction)
-    ).rgb;
+    ).rgb * texture_parameters.values.x;
 
     envColor = envColor / (envColor + vec3(1.0));
     return vec4(envColor, 1.0);

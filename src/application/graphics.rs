@@ -230,6 +230,7 @@ impl Graphics {
                 culling: None,
                 depth_enabled: Some(false),
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                target_format: None,
             })
             .texture(skybox_texture)
             .build();

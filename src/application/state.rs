@@ -151,6 +151,22 @@ impl State {
 
         // Get surface capabilities and select preferred format
         let surface_caps = surface.get_capabilities(&adapter);
+        let rgba16float_features =
+            adapter.get_texture_format_features(wgpu::TextureFormat::Rgba16Float);
+        let rgba16float_renderable = rgba16float_features.allowed_usages.contains(
+            wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_DST,
+        ) && rgba16float_features
+            .flags
+            .contains(wgpu::TextureFormatFeatureFlags::FILTERABLE);
+        let rg16float_features =
+            adapter.get_texture_format_features(wgpu::TextureFormat::Rg16Float);
+        let rg16float_renderable = rg16float_features.allowed_usages.contains(
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        ) && rg16float_features
+            .flags
+            .contains(wgpu::TextureFormatFeatureFlags::FILTERABLE);
         let surface_format = surface_caps
             .formats
             .iter()
@@ -188,6 +204,8 @@ impl State {
             device: Arc::clone(&device),
             queue: Arc::clone(&queue),
             config,
+            rgba16float_renderable,
+            rg16float_renderable,
             gpu_objects: GpuObjects::new(),
             post_processing,
         };

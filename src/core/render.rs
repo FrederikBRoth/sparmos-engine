@@ -24,6 +24,8 @@ pub struct RenderContext {
     pub device: Arc<wgpu::Device>, // Logical GPU device
     pub queue: Arc<wgpu::Queue>,   // Command queue for GPU
     pub config: wgpu::SurfaceConfiguration,
+    pub rgba16float_renderable: bool,
+    pub rg16float_renderable: bool,
     pub gpu_objects: GpuObjects,
     pub post_processing: PostProcessHandler,
 }

@@ -39,11 +39,23 @@ var ao_map: texture_2d<f32>;
 var texture_sampler: sampler;
 
 @group(3) @binding(0)
-
 var irradiance_map: texture_cube<f32>;
 
 @group(3) @binding(1)
-var skybox_sampler: sampler;
+var prefiltered_environment_map: texture_cube<f32>;
+
+@group(3) @binding(2)
+var brdf_lut: texture_2d<f32>;
+
+@group(3) @binding(3)
+var ibl_sampler: sampler;
+
+struct IblTextureParameters {
+    values: vec4<f32>,
+};
+
+@group(3) @binding(4)
+var<uniform> ibl_texture_parameters: IblTextureParameters;
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) texture: vec2<f32>,
@@ -115,11 +127,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         in.uv
     ).r;
 
-    let roughness = textureSample(
+    let roughness = clamp(textureSample(
         roughness_map,
         texture_sampler,
         in.uv
-    ).r;
+    ).r, 0.04, 1.0);
 
     let ao = textureSample(
         ao_map,
@@ -171,10 +183,25 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let ks = fresnel_schlick_roughness(max(dot(N, V), 0.0), f0, roughness);
-    let kd = 1.0 - ks;
-    let irradiance = textureSample(irradiance_map, skybox_sampler, N).rgb;
+    let kd = (1.0 - ks) * (1.0 - metallic);
+    let irradiance = textureSample(irradiance_map, ibl_sampler, N).rgb *
+        ibl_texture_parameters.values.x;
     let diffuse = irradiance * albedo;
-    let ambient = (kd * diffuse) * ao;
+    let reflection = reflect(-V, N);
+    let max_reflection_lod = f32(textureNumLevels(prefiltered_environment_map) - 1u);
+    let prefiltered_color = textureSampleLevel(
+        prefiltered_environment_map,
+        ibl_sampler,
+        reflection,
+        roughness * max_reflection_lod,
+    ).rgb * ibl_texture_parameters.values.x;
+    let environment_brdf = textureSample(
+        brdf_lut,
+        ibl_sampler,
+        vec2(max(dot(N, V), 0.0), roughness),
+    ).rg;
+    let specular_ibl = prefiltered_color * (ks * environment_brdf.x + environment_brdf.y);
+    let ambient = (kd * diffuse + specular_ibl) * ao;
     // Tone mapping
     var color = ambient + lo;
 
@@ -218,7 +245,7 @@ fn distribution_ggx(n: vec3<f32>, h: vec3<f32>, roughness: f32) -> f32 {
     var denom = (ndoth2 * (a2 - 1.0) + 1.0);
     denom = PI * denom * denom;
 
-    return nom / denom;
+    return nom / max(denom, 0.000001);
 }
 
 //Geometry function, G. Roughness essentially
@@ -228,7 +255,7 @@ fn geometry_schlick_ggx(ndotv: f32, roughness: f32) -> f32 {
     let nom = ndotv;
     let denom = ndotv * (1.0 - k) + k;
 
-    return nom / denom;
+    return nom / max(denom, 0.000001);
 }
 
 fn geometry_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32) -> f32 {

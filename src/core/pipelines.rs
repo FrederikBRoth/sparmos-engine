@@ -22,6 +22,7 @@ pub struct MaterialKey {
     pub vertex_layout: VertexLayoutKey,
     pub instance_layout: VertexLayoutKey,
     pub shader: String,
+    pub target_format: Option<wgpu::TextureFormat>,
 }
 
 #[derive(Clone)]
@@ -38,8 +39,9 @@ pub struct Material {
 
 impl Material {
     pub fn change_shader(&mut self, device: &Device, format: TextureFormat, shader: &ShaderModule) {
+        let target_format = self.key.target_format.unwrap_or(format);
         let new_pipeline = create_pipeline(
-            format,
+            target_format,
             device,
             &self.pipeline_layout,
             &self.texture,
@@ -56,6 +58,7 @@ pub struct PipelineConfig {
     pub culling: Option<wgpu::Face>,
     pub depth_enabled: Option<bool>,
     pub depth_compare: Option<wgpu::CompareFunction>,
+    pub target_format: Option<wgpu::TextureFormat>,
 }
 
 impl Default for PipelineConfig {
@@ -64,6 +67,7 @@ impl Default for PipelineConfig {
             culling: Some(wgpu::Face::Back),
             depth_enabled: Some(true),
             depth_compare: Some(wgpu::CompareFunction::Less),
+            target_format: None,
         }
     }
 }
@@ -98,6 +102,7 @@ impl<'a> MaterialBuilder<'a> {
             vertex_layout: self.vertex_layout.key(),
             instance_layout: self.instance_layout.key(),
             shader: self.shader.clone(),
+            target_format: self.config.target_format,
         }
     }
 
@@ -192,8 +197,12 @@ impl<'a> MaterialBuilder<'a> {
                 ..Default::default() // push_constant_ranges: &[],
             });
 
+        let target_format = self
+            .config
+            .target_format
+            .unwrap_or(self.graphics.engine.render_context.config.format);
         let pipeline = create_pipeline(
-            self.graphics.engine.render_context.config.format.clone(),
+            target_format,
             &self.graphics.engine.render_context.device,
             &render_pipeline_layout,
             &self.textures,

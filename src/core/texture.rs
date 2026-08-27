@@ -1,12 +1,19 @@
 use anyhow::*;
+use cgmath::{Deg, Matrix4, Point3, Vector3};
 use half::f16;
 use image::GenericImageView;
+use wgpu::util::DeviceExt;
 use wgpu::{BindGroup, BindGroupLayout, Sampler, TextureFormat};
 use winit::dpi::PhysicalSize;
 
 use crate::application::graphics::Graphics;
 
 pub const DEFAULT_IRRADIANCE_MAP_FACE_SIZE: u32 = 32;
+pub const DEFAULT_PREFILTERED_ENVIRONMENT_FACE_SIZE: u32 = 128;
+pub const DEFAULT_PREFILTERED_ENVIRONMENT_MIP_LEVELS: u32 = 5;
+pub const DEFAULT_BRDF_LUT_SIZE: u32 = 512;
+const HDR_HALF_FLOAT_STORAGE_TARGET: f32 = 16_376.0;
+const HALF_FLOAT_MAX: f32 = 65_504.0;
 
 #[derive(Clone)]
 pub struct Texture {
@@ -16,6 +23,7 @@ pub struct Texture {
     pub sampler: wgpu::Sampler,
     pub bind_group_layout: BindGroupLayout,
     pub bind_group: BindGroup,
+    _radiance_scale_buffer: wgpu::Buffer,
 }
 
 #[derive(Clone)]
@@ -29,6 +37,7 @@ pub struct TextureDefinition {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub view_type: TextureViewType,
+    pub radiance_scale: f32,
 }
 
 impl TextureDefinition {
@@ -53,7 +62,6 @@ impl TextureDefinition {
         let rgba = img.to_rgba8();
         let dimensions = img.dimensions();
 
-        println!("{:?}", dimensions);
         let size = wgpu::Extent3d {
             width: dimensions.0,
             height: dimensions.1,
@@ -85,6 +93,7 @@ impl TextureDefinition {
             texture,
             view,
             view_type: TextureViewType::D2,
+            radiance_scale: 1.0,
         })
     }
 
@@ -135,6 +144,7 @@ impl TextureDefinition {
             texture,
             view,
             view_type: TextureViewType::D2,
+            radiance_scale: 1.0,
         })
     }
 
@@ -209,106 +219,7 @@ impl TextureDefinition {
             texture,
             view,
             view_type: TextureViewType::Cube,
-        })
-    }
-
-    fn from_float_cubemap(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        face_size: u32,
-        label: Option<&str>,
-        mut create_face: impl FnMut(u32) -> Vec<[f32; 4]>,
-    ) -> Result<Self> {
-        if face_size == 0 {
-            bail!("Cubemap face size must be non-zero");
-        }
-
-        let size = wgpu::Extent3d {
-            width: face_size,
-            height: face_size,
-            depth_or_array_layers: 6,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label,
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        for face_index in 0..6 {
-            let face = create_face(face_index);
-            if face.len() != (face_size as usize) * (face_size as usize) {
-                bail!("Cubemap face has the wrong number of pixels");
-            }
-            let pixels = face
-                .iter()
-                .flat_map(|pixel| pixel.map(|channel| f16::from_f32(channel).to_bits()))
-                .collect::<Vec<_>>();
-
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d {
-                        x: 0,
-                        y: 0,
-                        z: face_index,
-                    },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                bytemuck::cast_slice(&pixels),
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(face_size * 8),
-                    rows_per_image: Some(face_size),
-                },
-                wgpu::Extent3d {
-                    width: face_size,
-                    height: face_size,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::Cube),
-            ..Default::default()
-        });
-
-        Ok(Self {
-            texture,
-            view,
-            view_type: TextureViewType::Cube,
-        })
-    }
-
-    fn from_hdr_cubemap(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        image: &image::Rgb32FImage,
-        label: Option<&str>,
-    ) -> Result<Self> {
-        let face_size = hdri_face_size(image)?;
-        Self::from_float_cubemap(device, queue, face_size, label, |face| {
-            equirectangular_face(image, face, face_size)
-        })
-    }
-
-    fn from_hdri_irradiance_map(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        image: &image::Rgb32FImage,
-        face_size: u32,
-        label: Option<&str>,
-    ) -> Result<Self> {
-        hdri_face_size(image)?;
-        let coefficients = project_environment_sh(image);
-        Self::from_float_cubemap(device, queue, face_size, label, |face| {
-            irradiance_face(&coefficients, face, face_size)
+            radiance_scale: 1.0,
         })
     }
 
@@ -428,6 +339,883 @@ impl Texture {
     }
 }
 
+pub struct RenderableCubemap {
+    pub texture: wgpu::Texture,
+    pub cube_view: wgpu::TextureView,
+    pub face_views: [wgpu::TextureView; 6],
+}
+
+pub fn create_renderable_cubemap(
+    device: &wgpu::Device,
+    face_size: u32,
+    label: Option<&str>,
+) -> Result<RenderableCubemap> {
+    create_renderable_cubemap_with_mips(device, face_size, 1, label)
+}
+
+fn create_renderable_cubemap_with_mips(
+    device: &wgpu::Device,
+    face_size: u32,
+    mip_level_count: u32,
+    label: Option<&str>,
+) -> Result<RenderableCubemap> {
+    if face_size == 0 {
+        bail!("Cubemap face size must be non-zero");
+    }
+    let maximum_mip_level_count = face_size.ilog2() + 1;
+    if mip_level_count == 0 || mip_level_count > maximum_mip_level_count {
+        bail!(
+            "Cubemap mip level count must be between 1 and {maximum_mip_level_count} for a {face_size}x{face_size} face"
+        );
+    }
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label,
+        size: wgpu::Extent3d {
+            width: face_size,
+            height: face_size,
+            depth_or_array_layers: 6,
+        },
+        mip_level_count,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+
+    let cube_view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label,
+        dimension: Some(wgpu::TextureViewDimension::Cube),
+        base_array_layer: 0,
+        array_layer_count: Some(6),
+        base_mip_level: 0,
+        mip_level_count: Some(mip_level_count),
+        ..Default::default()
+    });
+
+    let face_views = std::array::from_fn(|face| {
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            label,
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_array_layer: face as u32,
+            array_layer_count: Some(1),
+            base_mip_level: 0,
+            mip_level_count: Some(1),
+            ..Default::default()
+        })
+    });
+
+    Ok(RenderableCubemap {
+        texture,
+        cube_view,
+        face_views,
+    })
+}
+
+fn cubemap_face_views(
+    texture: &wgpu::Texture,
+    mip_level: u32,
+    label: Option<&str>,
+) -> [wgpu::TextureView; 6] {
+    std::array::from_fn(|face| {
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            label,
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_array_layer: face as u32,
+            array_layer_count: Some(1),
+            base_mip_level: mip_level,
+            mip_level_count: Some(1),
+            ..Default::default()
+        })
+    })
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct CubemapCaptureUniform {
+    view_proj: [[f32; 4]; 4],
+    roughness: f32,
+    source_resolution: f32,
+    _padding: [f32; 2],
+}
+
+// Capture-only clip conversion. Keeping this beside the cubemap passes means
+// camera projection and screen-to-world raycasting keep their existing matrix.
+#[rustfmt::skip]
+const CUBEMAP_OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.0,
+    0.0, 0.0, 0.5, 1.0,
+);
+
+const CAPTURE_CUBE_VERTICES: [[f32; 3]; 36] = [
+    [-1.0, -1.0, 1.0],
+    [1.0, -1.0, 1.0],
+    [1.0, 1.0, 1.0],
+    [-1.0, -1.0, 1.0],
+    [1.0, 1.0, 1.0],
+    [-1.0, 1.0, 1.0],
+    [1.0, -1.0, -1.0],
+    [-1.0, -1.0, -1.0],
+    [-1.0, 1.0, -1.0],
+    [1.0, -1.0, -1.0],
+    [-1.0, 1.0, -1.0],
+    [1.0, 1.0, -1.0],
+    [1.0, -1.0, 1.0],
+    [1.0, -1.0, -1.0],
+    [1.0, 1.0, -1.0],
+    [1.0, -1.0, 1.0],
+    [1.0, 1.0, -1.0],
+    [1.0, 1.0, 1.0],
+    [-1.0, -1.0, -1.0],
+    [-1.0, -1.0, 1.0],
+    [-1.0, 1.0, 1.0],
+    [-1.0, -1.0, -1.0],
+    [-1.0, 1.0, 1.0],
+    [-1.0, 1.0, -1.0],
+    [-1.0, 1.0, 1.0],
+    [1.0, 1.0, 1.0],
+    [1.0, 1.0, -1.0],
+    [-1.0, 1.0, 1.0],
+    [1.0, 1.0, -1.0],
+    [-1.0, 1.0, -1.0],
+    [-1.0, -1.0, -1.0],
+    [1.0, -1.0, -1.0],
+    [1.0, -1.0, 1.0],
+    [-1.0, -1.0, -1.0],
+    [1.0, -1.0, 1.0],
+    [-1.0, -1.0, 1.0],
+];
+
+fn upload_hdri(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    image: &image::Rgb32FImage,
+    label: Option<&str>,
+) -> Result<TextureDefinition> {
+    if image.width() == 0 || image.height() == 0 {
+        bail!("HDRI dimensions must be non-zero");
+    }
+
+    let radiance_scale = hdri_radiance_scale(image);
+
+    // LearnOpenGL flips HDR input vertically before using the standard spherical
+    // mapping. Very bright HDR pixels are scaled into a finite half-float range;
+    // the scale is restored in the skybox and PBR shaders.
+    let pixels = (0..image.height())
+        .rev()
+        .flat_map(|y| (0..image.width()).map(move |x| image.get_pixel(x, y)))
+        .flat_map(|pixel| {
+            [
+                hdr_channel_to_f16_bits(pixel[0], radiance_scale),
+                hdr_channel_to_f16_bits(pixel[1], radiance_scale),
+                hdr_channel_to_f16_bits(pixel[2], radiance_scale),
+                f16::ONE.to_bits(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let size = wgpu::Extent3d {
+        width: image.width(),
+        height: image.height(),
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label,
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    queue.write_texture(
+        texture.as_image_copy(),
+        bytemuck::cast_slice(&pixels),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(image.width() * 8),
+            rows_per_image: Some(image.height()),
+        },
+        size,
+    );
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    Ok(TextureDefinition {
+        texture,
+        view,
+        view_type: TextureViewType::D2,
+        radiance_scale,
+    })
+}
+
+fn hdr_channel_to_f16_bits(channel: f32, radiance_scale: f32) -> u16 {
+    let stored = if channel.is_finite() {
+        (channel / radiance_scale).clamp(-HALF_FLOAT_MAX, HALF_FLOAT_MAX)
+    } else {
+        0.0
+    };
+    f16::from_f32(stored).to_bits()
+}
+
+fn hdri_radiance_scale(image: &image::Rgb32FImage) -> f32 {
+    let peak_radiance = image
+        .pixels()
+        .flat_map(|pixel| pixel.0)
+        .filter(|channel| channel.is_finite())
+        .fold(0.0f32, f32::max);
+    (peak_radiance / HDR_HALF_FLOAT_STORAGE_TARGET).max(1.0)
+}
+
+fn cubemap_capture_matrices_with_parameters(
+    roughness: f32,
+    source_resolution: f32,
+) -> [CubemapCaptureUniform; 6] {
+    let origin = Point3::new(0.0, 0.0, 0.0);
+    // OpenGL framebuffer rows run bottom to top. WebGPU render attachments run
+    // top to bottom, so flip clip-space Y while retaining the standard
+    // LearnOpenGL cubemap directions and up vectors.
+    let render_target_flip = Matrix4::from_nonuniform_scale(1.0, -1.0, 1.0);
+    let projection = render_target_flip
+        * CUBEMAP_OPENGL_TO_WGPU_MATRIX
+        * cgmath::perspective(Deg(90.0), 1.0, 0.1, 10.0);
+    let directions = [
+        (Vector3::new(1.0, 0.0, 0.0), Vector3::new(0.0, -1.0, 0.0)),
+        (Vector3::new(-1.0, 0.0, 0.0), Vector3::new(0.0, -1.0, 0.0)),
+        (Vector3::new(0.0, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+        (Vector3::new(0.0, -1.0, 0.0), Vector3::new(0.0, 0.0, -1.0)),
+        (Vector3::new(0.0, 0.0, 1.0), Vector3::new(0.0, -1.0, 0.0)),
+        (Vector3::new(0.0, 0.0, -1.0), Vector3::new(0.0, -1.0, 0.0)),
+    ];
+
+    directions.map(|(direction, up)| CubemapCaptureUniform {
+        view_proj: (projection * Matrix4::look_at_rh(origin, origin + direction, up)).into(),
+        roughness,
+        source_resolution,
+        _padding: [0.0; 2],
+    })
+}
+
+fn render_cubemap_faces(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    input: &TextureDefinition,
+    input_dimension: wgpu::TextureViewDimension,
+    shader_source: &str,
+    face_size: u32,
+    mip_level_count: u32,
+    rendered_mip_level_count: u32,
+    roughness_per_mip: bool,
+    source_resolution: f32,
+    label: Option<&str>,
+    address_mode_u: wgpu::AddressMode,
+) -> Result<TextureDefinition> {
+    let target = create_renderable_cubemap_with_mips(device, face_size, mip_level_count, label)?;
+    if rendered_mip_level_count == 0 || rendered_mip_level_count > mip_level_count {
+        bail!("Rendered cubemap mip count must fit inside the target mip chain");
+    }
+    let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("cubemap capture camera layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+    let input_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("cubemap capture input layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: input_dimension,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("cubemap capture sampler"),
+        address_mode_u,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Linear,
+        ..Default::default()
+    });
+    let input_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("cubemap capture input"),
+        layout: &input_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&input.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    });
+
+    let capture_uniforms = (0..rendered_mip_level_count)
+        .map(|mip_level| {
+            let roughness = if roughness_per_mip && mip_level_count > 1 {
+                mip_level as f32 / (mip_level_count - 1) as f32
+            } else {
+                0.0
+            };
+            cubemap_capture_matrices_with_parameters(roughness, source_resolution)
+        })
+        .collect::<Vec<_>>();
+    let camera_buffers = capture_uniforms
+        .iter()
+        .map(|uniforms| {
+            std::array::from_fn(|face| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("cubemap capture camera"),
+                    contents: bytemuck::bytes_of(&uniforms[face]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                })
+            })
+        })
+        .collect::<Vec<[wgpu::Buffer; 6]>>();
+    let camera_bind_groups = camera_buffers
+        .iter()
+        .map(|buffers| {
+            std::array::from_fn(|face| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("cubemap capture camera"),
+                    layout: &camera_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buffers[face].as_entire_binding(),
+                    }],
+                })
+            })
+        })
+        .collect::<Vec<[wgpu::BindGroup; 6]>>();
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("cubemap capture pipeline layout"),
+        bind_group_layouts: &[Some(&camera_layout), Some(&input_layout)],
+        ..Default::default()
+    });
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label,
+        source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label,
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                }],
+            })],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rgba16Float,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: Texture::DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("cubemap capture cube"),
+        contents: bytemuck::cast_slice(&CAPTURE_CUBE_VERTICES),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+
+    let mip_face_views = (0..rendered_mip_level_count)
+        .map(|mip_level| cubemap_face_views(&target.texture, mip_level, label))
+        .collect::<Vec<_>>();
+    let depth_targets = (0..rendered_mip_level_count)
+        .map(|mip_level| {
+            let mip_size = (face_size >> mip_level).max(1);
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("cubemap capture depth"),
+                size: wgpu::Extent3d {
+                    width: mip_size,
+                    height: mip_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: Texture::DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            (texture, view)
+        })
+        .collect::<Vec<_>>();
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+    for mip_level in 0..rendered_mip_level_count as usize {
+        for (face, face_view) in mip_face_views[mip_level].iter().enumerate() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: face_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_targets[mip_level].1,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &camera_bind_groups[mip_level][face], &[]);
+            pass.set_bind_group(1, &input_bind_group, &[]);
+            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.draw(0..CAPTURE_CUBE_VERTICES.len() as u32, 0..1);
+        }
+    }
+    queue.submit(Some(encoder.finish()));
+
+    let RenderableCubemap {
+        texture,
+        cube_view,
+        face_views: _,
+    } = target;
+    Ok(TextureDefinition {
+        texture,
+        view: cube_view,
+        view_type: TextureViewType::Cube,
+        radiance_scale: input.radiance_scale,
+    })
+}
+
+fn generate_cubemap_mips(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    cubemap: &TextureDefinition,
+    face_size: u32,
+    mip_level_count: u32,
+    label: Option<&str>,
+) -> Result<()> {
+    if !matches!(&cubemap.view_type, TextureViewType::Cube) {
+        bail!("Cubemap mip generation input must be a cubemap texture");
+    }
+    if cubemap.texture.width() != face_size {
+        bail!("Cubemap mip generation face size does not match the texture");
+    }
+    if mip_level_count <= 1 {
+        return Ok(());
+    }
+    if mip_level_count > cubemap.texture.mip_level_count() {
+        bail!("Requested mip chain exceeds the cubemap texture mip count");
+    }
+
+    let source_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("cubemap mip source layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::Cube,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
+    let face_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("cubemap mip face layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("cubemap mip sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        ..Default::default()
+    });
+    let source_views = (1..mip_level_count)
+        .map(|target_mip| {
+            cubemap.texture.create_view(&wgpu::TextureViewDescriptor {
+                label,
+                dimension: Some(wgpu::TextureViewDimension::Cube),
+                base_array_layer: 0,
+                array_layer_count: Some(6),
+                base_mip_level: target_mip - 1,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        })
+        .collect::<Vec<_>>();
+    let source_bind_groups = source_views
+        .iter()
+        .map(|view| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cubemap mip source"),
+                layout: &source_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let face_uniforms = (0u32..6).map(|face| [face, 0, 0, 0]).collect::<Vec<_>>();
+    let face_buffers = face_uniforms
+        .iter()
+        .map(|uniform| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("cubemap mip face"),
+                contents: bytemuck::cast_slice(uniform),
+                usage: wgpu::BufferUsages::UNIFORM,
+            })
+        })
+        .collect::<Vec<_>>();
+    let face_bind_groups = face_buffers
+        .iter()
+        .map(|buffer| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cubemap mip face"),
+                layout: &face_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("cubemap mip pipeline layout"),
+        bind_group_layouts: &[Some(&source_layout), Some(&face_layout)],
+        ..Default::default()
+    });
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label,
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/cubemap_mipmap.wgsl").into()),
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label,
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rgba16Float,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let target_views = (1..mip_level_count)
+        .map(|mip_level| cubemap_face_views(&cubemap.texture, mip_level, label))
+        .collect::<Vec<_>>();
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+    for target_mip in 1..mip_level_count as usize {
+        for face in 0..6 {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target_views[target_mip - 1][face],
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &source_bind_groups[target_mip - 1], &[]);
+            pass.set_bind_group(1, &face_bind_groups[face], &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+    queue.submit(Some(encoder.finish()));
+
+    Ok(())
+}
+
+fn render_equirectangular_to_cubemap(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    hdri: &TextureDefinition,
+    face_size: u32,
+    label: Option<&str>,
+) -> Result<TextureDefinition> {
+    if !matches!(&hdri.view_type, TextureViewType::D2) {
+        bail!("Equirectangular capture input must be a 2D texture");
+    }
+    let mip_level_count = face_size.ilog2() + 1;
+    let environment = render_cubemap_faces(
+        device,
+        queue,
+        hdri,
+        wgpu::TextureViewDimension::D2,
+        include_str!("shaders/equirectangular_to_cubemap.wgsl"),
+        face_size,
+        mip_level_count,
+        1,
+        false,
+        1.0,
+        label,
+        wgpu::AddressMode::Repeat,
+    )?;
+    generate_cubemap_mips(
+        device,
+        queue,
+        &environment,
+        face_size,
+        mip_level_count,
+        label,
+    )?;
+    Ok(environment)
+}
+
+fn render_irradiance_map(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    environment: &TextureDefinition,
+    face_size: u32,
+    label: Option<&str>,
+) -> Result<TextureDefinition> {
+    if !matches!(&environment.view_type, TextureViewType::Cube) {
+        bail!("Irradiance capture input must be a cubemap texture");
+    }
+    render_cubemap_faces(
+        device,
+        queue,
+        environment,
+        wgpu::TextureViewDimension::Cube,
+        include_str!("shaders/irradiance_convolution.wgsl"),
+        face_size,
+        1,
+        1,
+        false,
+        environment.texture.width() as f32,
+        label,
+        wgpu::AddressMode::ClampToEdge,
+    )
+}
+
+fn render_prefiltered_environment_map(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    environment: &TextureDefinition,
+    face_size: u32,
+    mip_level_count: u32,
+    label: Option<&str>,
+) -> Result<TextureDefinition> {
+    if !matches!(&environment.view_type, TextureViewType::Cube) {
+        bail!("Specular prefilter input must be a cubemap texture");
+    }
+    render_cubemap_faces(
+        device,
+        queue,
+        environment,
+        wgpu::TextureViewDimension::Cube,
+        include_str!("shaders/prefilter_environment.wgsl"),
+        face_size,
+        mip_level_count,
+        mip_level_count,
+        true,
+        environment.texture.width() as f32,
+        label,
+        wgpu::AddressMode::ClampToEdge,
+    )
+}
+
+fn render_brdf_lut(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    size: u32,
+    label: Option<&str>,
+) -> Result<TextureDefinition> {
+    if size == 0 {
+        bail!("BRDF LUT size must be non-zero");
+    }
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label,
+        size: wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rg16Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label,
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/brdf_integration.wgsl").into()),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("BRDF integration pipeline layout"),
+        bind_group_layouts: &[],
+        ..Default::default()
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label,
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rg16Float,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&pipeline);
+        pass.draw(0..3, 0..1);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    Ok(TextureDefinition {
+        texture,
+        view,
+        view_type: TextureViewType::D2,
+        radiance_scale: 1.0,
+    })
+}
+
 // pub fn create_life_bind_group_and_layout(
 //     device: &wgpu::Device,
 //     view: &TextureView,
@@ -477,11 +1265,18 @@ impl Texture {
 //     (layout, bind_group)
 // }
 
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct TextureParameters {
+    values: [f32; 4],
+}
+
 fn create_bind_group_and_layout(
     device: &wgpu::Device,
     textures: &[TextureDefinition],
     sampler: &Sampler,
-) -> (BindGroupLayout, BindGroup) {
+    radiance_scale: f32,
+) -> (BindGroupLayout, BindGroup, wgpu::Buffer) {
     let mut entries = textures
         .iter()
         .enumerate()
@@ -506,6 +1301,16 @@ fn create_bind_group_and_layout(
         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
         count: None,
     });
+    entries.push(wgpu::BindGroupLayoutEntry {
+        binding: entries.len() as u32,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    });
     let texture_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &entries,
@@ -525,6 +1330,17 @@ fn create_bind_group_and_layout(
         binding: entries.len() as u32,
         resource: wgpu::BindingResource::Sampler(sampler),
     });
+    let radiance_scale_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("texture radiance scale"),
+        contents: bytemuck::bytes_of(&TextureParameters {
+            values: [radiance_scale, 0.0, 0.0, 0.0],
+        }),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    entries.push(wgpu::BindGroupEntry {
+        binding: entries.len() as u32,
+        resource: radiance_scale_buffer.as_entire_binding(),
+    });
 
     // Create bind group for the texture
     let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -533,7 +1349,11 @@ fn create_bind_group_and_layout(
         label: Some("diffuse_bind_group"),
     });
 
-    (texture_bind_group_layout, diffuse_bind_group)
+    (
+        texture_bind_group_layout,
+        diffuse_bind_group,
+        radiance_scale_buffer,
+    )
 }
 
 pub struct TextureBuilder<'a> {
@@ -594,6 +1414,10 @@ impl<'a> TextureBuilder<'a> {
     }
 
     fn finish(self, textures: Vec<TextureDefinition>) -> Texture {
+        let radiance_scale = textures
+            .first()
+            .map(|texture| texture.radiance_scale)
+            .unwrap_or(1.0);
         let sampler = self
             .gfx
             .get_device()
@@ -608,14 +1432,19 @@ impl<'a> TextureBuilder<'a> {
 
                 ..Default::default()
             });
-        let (bind_group_layout, bind_group) =
-            create_bind_group_and_layout(self.gfx.get_device(), &textures, &sampler);
+        let (bind_group_layout, bind_group, radiance_scale_buffer) = create_bind_group_and_layout(
+            self.gfx.get_device(),
+            &textures,
+            &sampler,
+            radiance_scale,
+        );
         Texture {
             label: self.label.to_string(),
             texture: textures,
             sampler,
             bind_group_layout,
             bind_group,
+            _radiance_scale_buffer: radiance_scale_buffer,
         }
     }
 
@@ -649,36 +1478,169 @@ impl<'a> TextureBuilder<'a> {
         self.finish(vec![cubemap])
     }
 
-    /// Decodes a 2:1 equirectangular Radiance HDR image and converts it to a
-    /// floating-point cubemap. The face size is one quarter of the HDRI width.
+    /// Decodes a 2:1 Radiance HDR image, uploads it, and renders a floating-point
+    /// environment cubemap on the GPU.
     pub fn hdri_cubemap(self, image: &[u8]) -> Texture {
+        ensure_hdr_preprocessing_supported(self.gfx.get_render_context().rgba16float_renderable)
+            .expect("GPU HDR cubemap preprocessing is unavailable");
         let hdri = decode_hdri(image).expect("Failed to decode Radiance HDR image");
-
-        let cubemap = TextureDefinition::from_hdr_cubemap(
+        let face_size = hdri_face_size(&hdri).expect("Invalid equirectangular HDR image");
+        let hdri_texture = upload_hdri(
             self.gfx.get_device(),
             self.gfx.get_queue(),
             &hdri,
             Some(self.label),
         )
-        .unwrap();
+        .expect("Failed to upload Radiance HDR image");
+        let cubemap = render_equirectangular_to_cubemap(
+            self.gfx.get_device(),
+            self.gfx.get_queue(),
+            &hdri_texture,
+            face_size,
+            Some(self.label),
+        )
+        .expect("Failed to render HDR environment cubemap");
         self.finish(vec![cubemap])
     }
 
-    /// Builds a low-resolution diffuse irradiance cubemap from a 2:1 Radiance
-    /// HDR image. Values are divided by PI for direct multiplication by albedo.
-    pub fn hdri_irradiance_map(self, image: &[u8]) -> Texture {
-        let hdri = decode_hdri(image).expect("Failed to decode Radiance HDR image");
-        let irradiance = TextureDefinition::from_hdri_irradiance_map(
+    /// Renders a diffuse irradiance cubemap from an existing environment cubemap.
+    pub fn irradiance_map(self, environment: &Texture) -> Texture {
+        self.irradiance_map_with_size(environment, DEFAULT_IRRADIANCE_MAP_FACE_SIZE)
+    }
+
+    pub fn irradiance_map_with_size(self, environment: &Texture, face_size: u32) -> Texture {
+        ensure_hdr_preprocessing_supported(self.gfx.get_render_context().rgba16float_renderable)
+            .expect("GPU irradiance preprocessing is unavailable");
+        let environment = environment
+            .texture
+            .first()
+            .expect("An environment Texture must contain a cubemap");
+        let irradiance = render_irradiance_map(
             self.gfx.get_device(),
             self.gfx.get_queue(),
-            &hdri,
-            DEFAULT_IRRADIANCE_MAP_FACE_SIZE,
+            environment,
+            face_size,
             Some(self.label),
         )
-        .unwrap();
+        .expect("Failed to render irradiance cubemap");
 
         self.finish(vec![irradiance])
     }
+
+    /// Builds the complete image-based lighting texture set used by the PBR
+    /// shader: diffuse irradiance, roughness-prefiltered specular radiance, and
+    /// the split-sum BRDF integration lookup table.
+    pub fn ibl_maps(self, environment: &Texture) -> Texture {
+        self.ibl_maps_with_sizes(
+            environment,
+            DEFAULT_IRRADIANCE_MAP_FACE_SIZE,
+            DEFAULT_PREFILTERED_ENVIRONMENT_FACE_SIZE,
+            DEFAULT_PREFILTERED_ENVIRONMENT_MIP_LEVELS,
+            DEFAULT_BRDF_LUT_SIZE,
+        )
+    }
+
+    pub fn ibl_maps_with_sizes(
+        self,
+        environment: &Texture,
+        irradiance_face_size: u32,
+        prefiltered_face_size: u32,
+        prefiltered_mip_level_count: u32,
+        brdf_lut_size: u32,
+    ) -> Texture {
+        let render_context = self.gfx.get_render_context();
+        ensure_ibl_preprocessing_supported(
+            render_context.rgba16float_renderable,
+            render_context.rg16float_renderable,
+        )
+        .expect("GPU specular IBL preprocessing is unavailable");
+        let environment = environment
+            .texture
+            .first()
+            .expect("An environment Texture must contain a cubemap");
+        let irradiance = render_irradiance_map(
+            self.gfx.get_device(),
+            self.gfx.get_queue(),
+            environment,
+            irradiance_face_size,
+            Some(self.label),
+        )
+        .expect("Failed to render irradiance cubemap");
+        let prefiltered_environment = render_prefiltered_environment_map(
+            self.gfx.get_device(),
+            self.gfx.get_queue(),
+            environment,
+            prefiltered_face_size,
+            prefiltered_mip_level_count,
+            Some(self.label),
+        )
+        .expect("Failed to render prefiltered environment cubemap");
+        let brdf_lut = render_brdf_lut(
+            self.gfx.get_device(),
+            self.gfx.get_queue(),
+            brdf_lut_size,
+            Some(self.label),
+        )
+        .expect("Failed to render BRDF integration lookup table");
+
+        self.finish(vec![irradiance, prefiltered_environment, brdf_lut])
+    }
+
+    /// Compatibility helper. New code can retain the environment cubemap and
+    /// pass it to `irradiance_map` for later IBL preprocessing stages.
+    pub fn hdri_irradiance_map(self, image: &[u8]) -> Texture {
+        ensure_hdr_preprocessing_supported(self.gfx.get_render_context().rgba16float_renderable)
+            .expect("GPU irradiance preprocessing is unavailable");
+        let hdri = decode_hdri(image).expect("Failed to decode Radiance HDR image");
+        let environment_face_size =
+            hdri_face_size(&hdri).expect("Invalid equirectangular HDR image");
+        let hdri_texture = upload_hdri(
+            self.gfx.get_device(),
+            self.gfx.get_queue(),
+            &hdri,
+            Some(self.label),
+        )
+        .expect("Failed to upload Radiance HDR image");
+        let environment = render_equirectangular_to_cubemap(
+            self.gfx.get_device(),
+            self.gfx.get_queue(),
+            &hdri_texture,
+            environment_face_size,
+            Some(self.label),
+        )
+        .expect("Failed to render HDR environment cubemap");
+        let irradiance = render_irradiance_map(
+            self.gfx.get_device(),
+            self.gfx.get_queue(),
+            &environment,
+            DEFAULT_IRRADIANCE_MAP_FACE_SIZE,
+            Some(self.label),
+        )
+        .expect("Failed to render irradiance cubemap");
+        self.finish(vec![irradiance])
+    }
+}
+
+fn ensure_hdr_preprocessing_supported(supported: bool) -> Result<()> {
+    if !supported {
+        bail!(
+            "The selected GPU adapter cannot use filterable Rgba16Float textures as render attachments"
+        );
+    }
+    Ok(())
+}
+
+fn ensure_ibl_preprocessing_supported(
+    rgba16float_renderable: bool,
+    rg16float_renderable: bool,
+) -> Result<()> {
+    ensure_hdr_preprocessing_supported(rgba16float_renderable)?;
+    if !rg16float_renderable {
+        bail!(
+            "The selected GPU adapter cannot use filterable Rg16Float textures as render attachments"
+        );
+    }
+    Ok(())
 }
 
 fn decode_hdri(bytes: &[u8]) -> Result<image::Rgb32FImage> {
@@ -702,170 +1664,176 @@ fn hdri_face_size(image: &image::Rgb32FImage) -> Result<u32> {
     Ok(width / 4)
 }
 
-fn equirectangular_face(image: &image::Rgb32FImage, face: u32, face_size: u32) -> Vec<[f32; 4]> {
-    cubemap_face(face, face_size, |direction| {
-        sample_equirectangular(image, direction)
-    })
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn irradiance_face(coefficients: &ShCoefficients, face: u32, face_size: u32) -> Vec<[f32; 4]> {
-    cubemap_face(face, face_size, |direction| {
-        evaluate_irradiance(coefficients, direction)
-    })
-}
+    #[test]
+    fn bright_hdri_channels_stay_finite_in_half_float_storage() {
+        let image =
+            image::Rgb32FImage::from_pixel(4, 2, image::Rgb([262_144.0, 196_608.0, 71_680.0]));
+        let radiance_scale = hdri_radiance_scale(&image);
 
-fn cubemap_face(
-    face: u32,
-    face_size: u32,
-    mut sample: impl FnMut([f32; 3]) -> [f32; 3],
-) -> Vec<[f32; 4]> {
-    let mut pixels = Vec::with_capacity((face_size * face_size) as usize);
-    for y in 0..face_size {
-        for x in 0..face_size {
-            let s = 2.0 * (x as f32 + 0.5) / face_size as f32 - 1.0;
-            let t = 2.0 * (y as f32 + 0.5) / face_size as f32 - 1.0;
-            let direction = cubemap_direction(face, s, t);
-            let rgb = sample(direction);
-            pixels.push([rgb[0], rgb[1], rgb[2], 1.0]);
+        assert!(radiance_scale > 1.0);
+        for channel in image.get_pixel(0, 0).0 {
+            let stored = f16::from_bits(hdr_channel_to_f16_bits(channel, radiance_scale));
+            assert!(stored.is_finite());
+            assert!(stored.to_f32().abs() <= HDR_HALF_FLOAT_STORAGE_TARGET);
         }
-    }
-    pixels
-}
 
-type ShCoefficients = [[f64; 3]; 9];
-
-fn project_environment_sh(image: &image::Rgb32FImage) -> ShCoefficients {
-    let width = image.width();
-    let height = image.height();
-    let longitude_steps = (0..width)
-        .map(|x| {
-            let longitude = ((x as f64 + 0.5) / width as f64 - 0.5) * std::f64::consts::TAU;
-            (longitude.cos(), longitude.sin())
-        })
-        .collect::<Vec<_>>();
-    let texel_angle = std::f64::consts::TAU / width as f64 * std::f64::consts::PI / height as f64;
-    let mut coefficients = [[0.0; 3]; 9];
-    let mut total_weight = 0.0;
-
-    for y in 0..height {
-        let polar_angle = (y as f64 + 0.5) / height as f64 * std::f64::consts::PI;
-        let sin_polar = polar_angle.sin();
-        let cos_polar = polar_angle.cos();
-        let weight = sin_polar * texel_angle;
-        total_weight += weight * width as f64;
-
-        for x in 0..width {
-            let (cos_longitude, sin_longitude) = longitude_steps[x as usize];
-            let direction = [
-                sin_polar * cos_longitude,
-                cos_polar,
-                sin_polar * sin_longitude,
-            ];
-            let basis = sh_basis(direction);
-            let radiance = image.get_pixel(x, y).0;
-
-            for coefficient in 0..9 {
-                for channel in 0..3 {
-                    coefficients[coefficient][channel] +=
-                        radiance[channel] as f64 * basis[coefficient] * weight;
-                }
-            }
-        }
+        let restored = f16::from_bits(hdr_channel_to_f16_bits(
+            image.get_pixel(0, 0)[0],
+            radiance_scale,
+        ))
+        .to_f32()
+            * radiance_scale;
+        let relative_error = (restored - 262_144.0).abs() / 262_144.0;
+        assert!(relative_error < 0.001);
+        assert_eq!(
+            f16::from_bits(hdr_channel_to_f16_bits(f32::INFINITY, radiance_scale)),
+            f16::ZERO,
+        );
     }
 
-    let normalization = 4.0 * std::f64::consts::PI / total_weight;
-    for coefficient in &mut coefficients {
-        for channel in coefficient {
-            *channel *= normalization;
-        }
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn hdr_scale_shader_bindings_validate() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let std::result::Result::Ok(adapter) =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+                ..Default::default()
+            }))
+        else {
+            return;
+        };
+        let (device, _) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+                .expect("Failed to create shader validation device");
+        let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+
+        let skybox_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("HDR scale skybox validation"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/skybox.wgsl").into()),
+        });
+        let _skybox_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("HDR scale skybox validation"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &skybox_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 12,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                })],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &skybox_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let pbr_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("HDR scale PBR validation"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/pbr_shader_textured.wgsl").into(),
+            ),
+        });
+        let _pbr_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("HDR scale PBR validation"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &pbr_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: 32,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x3,
+                                offset: 0,
+                                shader_location: 0,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 12,
+                                shader_location: 1,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x3,
+                                offset: 20,
+                                shader_location: 2,
+                            },
+                        ],
+                    }),
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: 44,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x4,
+                                offset: 0,
+                                shader_location: 5,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x4,
+                                offset: 16,
+                                shader_location: 6,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x3,
+                                offset: 32,
+                                shader_location: 7,
+                            },
+                        ],
+                    }),
+                ],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &pbr_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let validation_error = pollster::block_on(error_scope.pop());
+        assert!(
+            validation_error.is_none(),
+            "HDR scale shader validation failed: {validation_error:?}"
+        );
     }
-    coefficients
-}
-
-fn sh_basis(direction: [f64; 3]) -> [f64; 9] {
-    let [x, y, z] = direction;
-    [
-        0.282_094_791_773_878_14,
-        0.488_602_511_902_919_9 * y,
-        0.488_602_511_902_919_9 * z,
-        0.488_602_511_902_919_9 * x,
-        1.092_548_430_592_079_2 * x * y,
-        1.092_548_430_592_079_2 * y * z,
-        0.315_391_565_252_520_05 * (3.0 * z * z - 1.0),
-        1.092_548_430_592_079_2 * x * z,
-        0.546_274_215_296_039_6 * (x * x - y * y),
-    ]
-}
-
-fn evaluate_irradiance(coefficients: &ShCoefficients, direction: [f32; 3]) -> [f32; 3] {
-    let basis = sh_basis(direction.map(f64::from));
-    let band_factors = [
-        1.0,
-        2.0 / 3.0,
-        2.0 / 3.0,
-        2.0 / 3.0,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-    ];
-    std::array::from_fn(|channel| {
-        let value = (0..9)
-            .map(|coefficient| {
-                coefficients[coefficient][channel] * basis[coefficient] * band_factors[coefficient]
-            })
-            .sum::<f64>();
-        value.max(0.0) as f32
-    })
-}
-
-fn cubemap_direction(face: u32, s: f32, t: f32) -> [f32; 3] {
-    let direction = match face {
-        0 => [1.0, -t, -s],
-        1 => [-1.0, -t, s],
-        2 => [s, 1.0, t],
-        3 => [s, -1.0, -t],
-        4 => [s, -t, 1.0],
-        5 => [-s, -t, -1.0],
-        _ => unreachable!("A cubemap has exactly six faces"),
-    };
-    let length =
-        (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2])
-            .sqrt();
-    [
-        direction[0] / length,
-        direction[1] / length,
-        direction[2] / length,
-    ]
-}
-
-fn sample_equirectangular(image: &image::Rgb32FImage, direction: [f32; 3]) -> [f32; 3] {
-    let width = image.width() as i32;
-    let height = image.height() as i32;
-    let longitude = direction[2].atan2(direction[0]);
-    let latitude = direction[1].clamp(-1.0, 1.0).asin();
-    let u = 0.5 + longitude / std::f32::consts::TAU;
-    let v = 0.5 - latitude / std::f32::consts::PI;
-
-    let source_x = u * width as f32 - 0.5;
-    let source_y = v * height as f32 - 0.5;
-    let x0 = source_x.floor() as i32;
-    let x1 = x0 + 1;
-    let source_y0 = source_y.floor() as i32;
-    let y0 = source_y0.clamp(0, height - 1);
-    let y1 = (source_y0 + 1).clamp(0, height - 1);
-    let tx = source_x - source_x.floor();
-    let ty = (source_y - source_y.floor()).clamp(0.0, 1.0);
-
-    let top_left = image.get_pixel(x0.rem_euclid(width) as u32, y0 as u32).0;
-    let top_right = image.get_pixel(x1.rem_euclid(width) as u32, y0 as u32).0;
-    let bottom_left = image.get_pixel(x0.rem_euclid(width) as u32, y1 as u32).0;
-    let bottom_right = image.get_pixel(x1.rem_euclid(width) as u32, y1 as u32).0;
-
-    std::array::from_fn(|channel| {
-        let top = top_left[channel] * (1.0 - tx) + top_right[channel] * tx;
-        let bottom = bottom_left[channel] * (1.0 - tx) + bottom_right[channel] * tx;
-        top * (1.0 - ty) + bottom * ty
-    })
 }
