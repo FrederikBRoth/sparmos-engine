@@ -243,6 +243,26 @@ impl State {
             include_str!("../core/shaders/pbr_shader_textured.wgsl"),
         );
         gfx.shader("skybox", include_str!("../core/shaders/skybox.wgsl"));
+        gfx.shader(
+            "equirectangular_to_cubemap",
+            include_str!("../core/shaders/equirectangular_to_cubemap.wgsl"),
+        );
+        gfx.shader(
+            "irradiance_convolution",
+            include_str!("../core/shaders/irradiance_convolution.wgsl"),
+        );
+        gfx.shader(
+            "prefilter_environment",
+            include_str!("../core/shaders/prefilter_environment.wgsl"),
+        );
+        gfx.shader(
+            "cubemap_mipmap",
+            include_str!("../core/shaders/cubemap_mipmap.wgsl"),
+        );
+        gfx.shader(
+            "brdf_integration",
+            include_str!("../core/shaders/brdf_integration.wgsl"),
+        );
         // post_processing.new_effect(size, surface_format, Effect::ChromaticTwo);
 
         //We cant initialize audio in the browser before a user has interacted with the website.

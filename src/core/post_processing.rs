@@ -47,7 +47,7 @@ impl PostProcessHandler {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: format,
+            format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -135,7 +135,7 @@ impl PostProcessHandler {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: format, // MUST match swapchain
+                        format, // MUST match swapchain
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -167,7 +167,7 @@ impl PostProcessHandler {
             view,
             bind_group,
             pipeline: post_pipeline,
-            format: format,
+            format,
         };
         self.post_processes.insert(effect, pp);
     }

@@ -1,5 +1,6 @@
 use indexmap::IndexMap;
 use log::warn;
+use std::collections::HashMap;
 use wgpu::{
     BindGroup, BindGroupLayout, Device, PipelineLayout, RenderPipeline, ShaderModule, TextureFormat,
 };
@@ -9,11 +10,188 @@ use crate::{
     core::{
         buffer::{Buffer, BufferKey, BufferType, UniformParameters},
         geometry::{Vertex, VertexBufferLayoutOwned, VertexLayoutKey},
-        render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle},
+        render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle, RenderContext},
         resource::BufferHandle,
         texture::Texture,
     },
 };
+
+#[derive(Clone)]
+pub struct RenderPipelineState {
+    pub pipeline: RenderPipeline,
+    pub pipeline_layout: PipelineLayout,
+}
+
+pub struct RenderPipelineBuilder<'a> {
+    device: &'a Device,
+    shaders: Option<&'a HashMap<String, ShaderModule>>,
+    shader: Option<&'a ShaderModule>,
+    shader_name: Option<String>,
+    label: String,
+    bind_group_layouts: Vec<BindGroupLayout>,
+    vertex_layouts: Vec<VertexBufferLayoutOwned>,
+    config: PipelineConfig,
+    primitive: wgpu::PrimitiveState,
+    blend: Option<wgpu::BlendState>,
+    pipeline_layout: Option<PipelineLayout>,
+}
+
+impl<'a> RenderPipelineBuilder<'a> {
+    pub(crate) fn new(render_context: &'a RenderContext, label: &str) -> Self {
+        Self::from_parts(
+            &render_context.device,
+            Some(&render_context.shaders),
+            None,
+            label,
+        )
+    }
+
+    pub(crate) fn from_shader(device: &'a Device, label: &str, shader: &'a ShaderModule) -> Self {
+        Self::from_parts(device, None, Some(shader), label)
+    }
+
+    fn from_parts(
+        device: &'a Device,
+        shaders: Option<&'a HashMap<String, ShaderModule>>,
+        shader: Option<&'a ShaderModule>,
+        label: &str,
+    ) -> Self {
+        Self {
+            device,
+            shaders,
+            shader,
+            shader_name: None,
+            label: label.to_string(),
+            bind_group_layouts: Vec::new(),
+            vertex_layouts: Vec::new(),
+            config: PipelineConfig::default(),
+            primitive: wgpu::PrimitiveState::default(),
+            blend: Some(wgpu::BlendState::REPLACE),
+            pipeline_layout: None,
+        }
+    }
+
+    pub fn shader(mut self, shader: &str) -> Self {
+        self.shader_name = Some(shader.to_string());
+        self
+    }
+
+    pub fn target_format(mut self, format: TextureFormat) -> Self {
+        self.config.target_format = Some(format);
+        self
+    }
+
+    pub fn vertex_layout(mut self, layout: VertexBufferLayoutOwned) -> Self {
+        self.vertex_layouts.push(layout);
+        self
+    }
+
+    pub fn bind_group_layout(mut self, layout: &BindGroupLayout) -> Self {
+        self.bind_group_layouts.push(layout.clone());
+        self
+    }
+
+    pub fn config(mut self, config: PipelineConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    pub fn primitive(mut self, primitive: wgpu::PrimitiveState) -> Self {
+        self.config.culling = primitive.cull_mode;
+        self.primitive = primitive;
+        self
+    }
+
+    pub fn blend(mut self, blend: Option<wgpu::BlendState>) -> Self {
+        self.blend = blend;
+        self
+    }
+
+    pub fn depth(mut self, enabled: bool) -> Self {
+        self.config.depth_enabled = enabled.then_some(true);
+        self
+    }
+
+    pub(crate) fn existing_pipeline_layout(mut self, layout: &PipelineLayout) -> Self {
+        self.pipeline_layout = Some(layout.clone());
+        self
+    }
+
+    pub fn build(self) -> RenderPipelineState {
+        let shader = self.shader.unwrap_or_else(|| {
+            let shader_name = self
+                .shader_name
+                .as_deref()
+                .expect("Render pipeline shader must be configured");
+            self.shaders
+                .expect("Named shaders require a render context")
+                .get(shader_name)
+                .unwrap_or_else(|| panic!("Shader '{shader_name}' is not registered"))
+        });
+        let target_format = self
+            .config
+            .target_format
+            .expect("Render pipeline target format must be configured");
+        let bind_group_layouts = self.bind_group_layouts.iter().map(Some).collect::<Vec<_>>();
+        let pipeline_layout = self.pipeline_layout.unwrap_or_else(|| {
+            self.device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(&self.label),
+                    bind_group_layouts: &bind_group_layouts,
+                    ..Default::default()
+                })
+        });
+        let vertex_layouts = self
+            .vertex_layouts
+            .iter()
+            .map(VertexBufferLayoutOwned::to_wgpu)
+            .collect::<Vec<_>>();
+        let mut primitive = self.primitive;
+        primitive.cull_mode = self.config.culling;
+        let depth_stencil =
+            self.config
+                .depth_enabled
+                .map(|depth_write_enabled| wgpu::DepthStencilState {
+                    format: Texture::DEPTH_FORMAT,
+                    depth_write_enabled: Some(depth_write_enabled),
+                    depth_compare: self.config.depth_compare,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                });
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(&self.label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &vertex_layouts,
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: target_format,
+                        blend: self.blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive,
+                depth_stencil,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+
+        RenderPipelineState {
+            pipeline,
+            pipeline_layout,
+        }
+    }
+}
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct MaterialKey {
@@ -40,20 +218,17 @@ pub struct Material {
 impl Material {
     pub fn change_shader(&mut self, device: &Device, format: TextureFormat, shader: &ShaderModule) {
         let target_format = self.key.target_format.unwrap_or(format);
-        let new_pipeline = create_pipeline(
-            target_format,
-            device,
-            &self.pipeline_layout,
-            &self.texture,
-            shader,
-            &self.mesh_buffer_layout,
-            &self.ic_buffer_layout,
-            &PipelineConfig::default(),
-        );
-        self.pipeline = new_pipeline;
+        let state = RenderPipelineBuilder::from_shader(device, "Render Pipeline", shader)
+            .target_format(target_format)
+            .vertex_layout(self.mesh_buffer_layout.clone())
+            .vertex_layout(self.ic_buffer_layout.clone())
+            .existing_pipeline_layout(&self.pipeline_layout)
+            .build();
+        self.pipeline = state.pipeline;
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct PipelineConfig {
     pub culling: Option<wgpu::Face>,
     pub depth_enabled: Option<bool>,
@@ -148,14 +323,6 @@ impl<'a> MaterialBuilder<'a> {
     }
 
     pub fn build(self) -> MaterialHandle {
-        let shader = self
-            .graphics
-            .engine
-            .render_context
-            .shaders
-            .get(&self.shader)
-            .unwrap();
-
         let key = self.key();
 
         //if this material exists already, just return the existing handle
@@ -169,53 +336,43 @@ impl<'a> MaterialBuilder<'a> {
             println!("{:?} clashes with another implemented material", key);
             return handle;
         }
-        let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
+        let mut bind_group_layouts = Vec::new();
 
         for system in self.graphics.engine.systems.get_bind_group_layouts() {
-            bind_group_layouts.push(system);
+            if let Some(layout) = system {
+                bind_group_layouts.push(layout.clone());
+            }
         }
         for texture in self.textures.iter() {
-            bind_group_layouts.push(Some(&texture.bind_group_layout));
+            bind_group_layouts.push(texture.bind_group_layout.clone());
         }
         for buffer in self.buffers.values() {
-            bind_group_layouts.push(Some(&buffer.bind_group_layout));
+            bind_group_layouts.push(buffer.bind_group_layout.clone());
         }
         if let Some(compute_layout) = &self.compute_render_buffer {
-            bind_group_layouts.push(Some(&compute_layout.bind_group_layout));
+            bind_group_layouts.push(compute_layout.bind_group_layout.clone());
         }
-
-        //First check is if a texture was passed to the material. If it was, do a textured pipeline, if
-        //not go primitive
-        let render_pipeline_layout = self
-            .graphics
-            .engine
-            .render_context
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &bind_group_layouts,
-                ..Default::default() // push_constant_ranges: &[],
-            });
 
         let target_format = self
             .config
             .target_format
             .unwrap_or(self.graphics.engine.render_context.config.format);
-        let pipeline = create_pipeline(
-            target_format,
-            &self.graphics.engine.render_context.device,
-            &render_pipeline_layout,
-            &self.textures,
-            shader,
-            &self.vertex_layout,
-            &self.instance_layout,
-            &self.config,
-        );
+        let mut pipeline_builder =
+            RenderPipelineBuilder::new(&self.graphics.engine.render_context, "Render Pipeline")
+                .shader(&self.shader)
+                .config(self.config)
+                .target_format(target_format)
+                .vertex_layout(self.vertex_layout.clone())
+                .vertex_layout(self.instance_layout.clone());
+        for layout in &bind_group_layouts {
+            pipeline_builder = pipeline_builder.bind_group_layout(layout);
+        }
+        let state = pipeline_builder.build();
         let compute_bind = self.compute_render_buffer.map(|c| c.bind_group);
         let material = Material {
             key: key.clone(),
-            pipeline,
-            pipeline_layout: render_pipeline_layout,
+            pipeline: state.pipeline,
+            pipeline_layout: state.pipeline_layout,
             texture: self.textures.clone(),
             //TODO FIX
             buffers: self.buffers.clone(),
@@ -237,115 +394,6 @@ impl<'a> MaterialBuilder<'a> {
             .material_lookup
             .insert(key, handle);
         handle
-    }
-}
-
-fn create_pipeline(
-    format: TextureFormat,
-    device: &Device,
-    render_pipeline_layout: &PipelineLayout,
-    texture: &[Texture],
-    shader: &ShaderModule,
-    mesh: &VertexBufferLayoutOwned,
-    instance_controller: &VertexBufferLayoutOwned,
-    config: &PipelineConfig,
-) -> RenderPipeline {
-    if !texture.is_empty() {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: shader,
-                entry_point: Some("vs_main"),
-                buffers: &[mesh.to_wgpu(), instance_controller.to_wgpu()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent::REPLACE,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: config.culling,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: Texture::DEPTH_FORMAT,
-                depth_write_enabled: config.depth_enabled,
-                depth_compare: config.depth_compare,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            // depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        })
-    } else {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: shader,
-                entry_point: Some("vs_main"),
-                buffers: &[mesh.to_wgpu(), instance_controller.to_wgpu()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent::REPLACE,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: config.culling,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: config.depth_enabled,
-                depth_compare: config.depth_compare,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            // depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        })
     }
 }
 

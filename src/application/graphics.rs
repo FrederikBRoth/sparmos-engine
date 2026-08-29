@@ -16,7 +16,9 @@ use crate::{
         entities::World,
         geometry::{ModelBuilder, Skybox, Vertex},
         instance::{DefaultInstanceLayout, InstanceBuilder, RawInstance},
-        pipelines::{ComputeRenderingBuilder, MaterialBuilder, PipelineConfig},
+        pipelines::{
+            ComputeRenderingBuilder, MaterialBuilder, PipelineConfig, RenderPipelineBuilder,
+        },
         render::{ComputeHandle, MaterialHandle, RenderContext, SkyboxRenderable},
         resource::BufferHandle,
         texture::{Texture, TextureBuilder},
@@ -91,6 +93,10 @@ impl Graphics {
             compute_render_buffer: None,
             config: PipelineConfig::default(),
         }
+    }
+
+    pub fn pipeline<'a>(&'a self, label: &str) -> RenderPipelineBuilder<'a> {
+        RenderPipelineBuilder::new(&self.engine.render_context, label)
     }
     pub fn instances(&mut self) -> InstanceBuilder<'_, DefaultInstanceLayout> {
         self.instances_typed::<DefaultInstanceLayout>()

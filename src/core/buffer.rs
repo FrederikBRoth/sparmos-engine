@@ -154,6 +154,27 @@ impl Buffer {
         Self::from_buffer(buffer, device, buffer_type)
     }
 
+    pub fn new_init_matching<T: bytemuck::Pod>(
+        data: &[T],
+        device: &wgpu::Device,
+        buffer_type: BufferType,
+        template: &Buffer,
+    ) -> Self {
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Buffer"),
+            contents: bytemuck::cast_slice(data),
+            usage: buffer_type.usage(),
+        });
+        let bind_group = Self::create_bind_group(device, &template.bind_group_layout, &buffer);
+
+        Self {
+            buffer,
+            bind_group_layout: template.bind_group_layout.clone(),
+            bind_group,
+            key: template.key.clone(),
+        }
+    }
+
     pub fn new(
         object_size: usize,
         size: usize,

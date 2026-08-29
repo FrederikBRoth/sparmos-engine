@@ -18,8 +18,8 @@ use crate::{
 };
 
 pub struct RenderContext {
-    pub depth_texture: TextureDepth,
-    pub overscan_depth_texture: TextureDepth,
+    pub(crate) depth_texture: TextureDepth,
+    pub(crate) overscan_depth_texture: TextureDepth,
     pub shaders: HashMap<String, ShaderModule>,
     pub device: Arc<wgpu::Device>, // Logical GPU device
     pub queue: Arc<wgpu::Queue>,   // Command queue for GPU
@@ -81,7 +81,7 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                     let mesh = &scene.meshes[mesh];
 
                     if let Some(texture_handle) = texture {
-                        let texture = &scene.textures[texture_handle.clone()];
+                        let texture = &scene.textures[texture_handle];
                         self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
                         bind_group_id += 1;
                     }
