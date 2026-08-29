@@ -70,6 +70,7 @@ impl Graphics {
         &mut self.engine.render_context.device
     }
     /// Returns a mutable reference to the get queue of this [`Graphics`].
+    #[allow(unused)]
     pub(crate) fn get_queue_mut(&mut self) -> &mut Arc<Queue> {
         &mut self.engine.render_context.queue
     }
@@ -142,11 +143,11 @@ impl Graphics {
 
     pub fn add_entity<B: DynamicBundle + 'static>(&mut self, bundle: B) -> Entity {
         let world = Rc::clone(&self.world);
-        if let Some(mut world) = world.try_borrow_mut().ok() {
+        if let Ok(mut world) = world.try_borrow_mut() {
             world.add_entity(bundle)
         } else {
             let entity = world.borrow().entities.reserve_entity();
-            let entity_clone = entity.clone();
+            let entity_clone = entity;
             let command = AddEntity(Box::new(move |world| {
                 world.insert(entity_clone, bundle).unwrap();
             }));
@@ -155,14 +156,12 @@ impl Graphics {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn get_bind_group_layouts(&self) -> Vec<Option<&wgpu::BindGroupLayout>> {
         self.engine.systems.get_bind_group_layouts()
     }
 
-    pub fn entity_query_first<B: Query>(&self, f: impl for<'a> FnOnce(<B as Query>::Item<'a>))
-    where
-        B: Query,
-    {
+    pub fn entity_query_first<B: Query>(&self, f: impl for<'a> FnOnce(<B as Query>::Item<'a>)) {
         let world = &self.world.borrow();
 
         world.query_first(f);
@@ -182,10 +181,7 @@ impl Graphics {
     //         f(&mut self.resources, item);
     //     }
     // }
-    pub fn entity_query<B: Query>(&self, f: impl for<'a> FnOnce(QueryBorrow<'a, B>))
-    where
-        B: Query,
-    {
+    pub fn entity_query<B: Query>(&self, f: impl for<'a> FnOnce(QueryBorrow<'a, B>)) {
         let world = &self.world.borrow();
 
         world.query(f);
@@ -216,7 +212,7 @@ impl Graphics {
         let map = &mut self.engine.resources.named_buffers;
         if !map.contains_key(name) {
             let handle = self.engine.resources.buffers.insert(buffer);
-            map.insert(name.to_string(), handle.clone());
+            map.insert(name.to_string(), handle);
             handle
         } else {
             map[name]

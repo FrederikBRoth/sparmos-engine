@@ -112,7 +112,7 @@ impl AudioHandler {
 
         let stream = device
             .build_output_stream(
-                config.clone(),
+                config,
                 move |data: &mut [f32], _| {
                     process_audio_commands(
                         &mut audio_engine.consumer,
@@ -150,7 +150,7 @@ impl AudioHandler {
 
         AudioHandler {
             _audio_stream: stream,
-            sample_rate: sample_rate,
+            sample_rate,
             producer,
         }
     }
@@ -201,6 +201,12 @@ impl Limiter {
     }
 }
 
+impl Default for Limiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn process_audio_commands(
     consumer: &mut Consumer<AudioCommand>,
     audio_triggers: &mut HashMap<AudioTrigger, Sound>,
@@ -228,9 +234,7 @@ fn process_audio_commands(
                 }
             }
             AudioCommand::Add(trigger, sound) => {
-                if !audio_triggers.contains_key(&trigger) {
-                    audio_triggers.insert(trigger, sound);
-                }
+                audio_triggers.entry(trigger).or_insert(sound);
             }
         }
     }

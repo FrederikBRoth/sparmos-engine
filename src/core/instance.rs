@@ -517,7 +517,7 @@ impl<'a, T: RawInstance> InstanceBuilder<'a, T> {
                 });
         let ic = InstanceController::<T> {
             pending: Vec::with_capacity(instances.len()),
-            instances: instances,
+            instances,
             offset: 0,
             size: len,
             buffer_layout: T::layout(),

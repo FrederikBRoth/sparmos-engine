@@ -250,7 +250,7 @@ fn line_trace_filtered(
                 // Backface culling
                 if t < closest_t {
                     closest_t = t;
-                    hit_quad = Some(quad_id.clone() as u32);
+                    hit_quad = Some(*quad_id as u32);
                 }
             }
         }

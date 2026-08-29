@@ -82,10 +82,8 @@ impl Midi {
                         }
                     }
 
-                    TrackEventKind::Meta(meta) => {
-                        if let MetaMessage::Tempo(t) = meta {
-                            tempos.push(t.as_int());
-                        }
+                    TrackEventKind::Meta(MetaMessage::Tempo(t)) => {
+                        tempos.push(t.as_int());
                     }
 
                     _ => {}
@@ -95,7 +93,7 @@ impl Midi {
 
         Midi {
             length: current_time,
-            tempos: tempos,
+            tempos,
             ticks_per_quarter: beat_length,
             channels,
         }

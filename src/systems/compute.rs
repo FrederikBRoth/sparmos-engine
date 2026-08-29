@@ -1,13 +1,9 @@
-use std::any::TypeId;
-
-use slotmap::SlotMap;
 use wgpu::{BindGroupLayout, BufferUsages, ComputePipeline, ShaderStages};
 
 use crate::{
     application::graphics::Graphics,
     core::{
         buffer::{Buffer, BufferType, StorageParameters, UniformParameters},
-        engine::System,
         render::{ComputeHandle, RenderContext},
     },
 };
@@ -52,7 +48,7 @@ impl<'a> ComputeBuilder<'a> {
     ) -> Self {
         let buffer = Buffer::new_init(
             data,
-            &self.gfx.get_device(),
+            self.gfx.get_device(),
             BufferType::UniformBuffer(UniformParameters {
                 shader_stages: ShaderStages::COMPUTE,
                 ..Default::default()
@@ -70,7 +66,7 @@ impl<'a> ComputeBuilder<'a> {
     pub fn initial_data<T: bytemuck::Pod>(mut self, data: &[T]) -> Self {
         self.initial_data = Some(Buffer::new_init(
             data,
-            &self.gfx.get_device(),
+            self.gfx.get_device(),
             BufferType::StorageBuffer(StorageParameters {
                 shader_stages: ShaderStages::COMPUTE,
                 usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
@@ -182,23 +178,22 @@ impl Compute {
                 .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: Some("Introduction Compute Pipeline"),
                     layout: Some(&render_pipeline_layout),
-                    module: &shader,
+                    module: shader,
                     entry_point: None,
                     compilation_options: Default::default(),
                     cache: Default::default(),
                 });
-        let compute = Compute {
+
+        Compute {
             readback_status: readback_state,
             pipeline,
-            input_buffers: input_buffers,
-            output_buffer: output_buffer,
+            input_buffers,
+            output_buffer,
             temp_buffer,
             length: length as u32,
             data,
             render_buffer,
-        };
-
-        compute
+        }
     }
     pub fn read_result(&mut self, data: Result<wgpu::BufferView, wgpu::MapRangeError>) {
         let mapped = data.unwrap();

@@ -17,19 +17,19 @@ impl EguiInspectable for PhysicsBasedRenderingConstants {
             .add(egui::Slider::new(&mut self.metallic, 0.0..=1.0).text("Metallic"))
             .changed()
         {
-            gfx.update_buffer(handle, &[self.clone()]);
+            gfx.update_buffer(handle, &[*self]);
         };
         if ui
             .add(egui::Slider::new(&mut self.roughness, 0.0..=1.0).text("Roughness"))
             .changed()
         {
-            gfx.update_buffer(handle, &[self.clone()]);
+            gfx.update_buffer(handle, &[*self]);
         };
         if ui
             .add(egui::Slider::new(&mut self.ao, 0.0..=1.0).text("AO"))
             .changed()
         {
-            gfx.update_buffer(handle, &[self.clone()]);
+            gfx.update_buffer(handle, &[*self]);
         };
     }
 }

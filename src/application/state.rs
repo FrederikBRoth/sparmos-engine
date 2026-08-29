@@ -388,7 +388,7 @@ impl State {
         self.graphics.run_all_systems();
     }
 
-    pub fn render(&mut self, dt: std::time::Duration, game: &mut Box<dyn Game>) {
+    pub fn render(&mut self, _dt: std::time::Duration, _game: &mut Box<dyn Game>) {
         if !self.surface_configured {
             return;
         }
@@ -424,7 +424,7 @@ impl State {
                                 if compute_pipeline.readback_status == ReadbackState::Pending {
                                     continue;
                                 };
-                                let num_dispatches = compute_pipeline.length.div_ceil(64) as u32;
+                                let num_dispatches = compute_pipeline.length.div_ceil(64);
 
                                 {
                                     let mut pass = encoder.begin_compute_pass(&Default::default());
@@ -450,7 +450,7 @@ impl State {
                                     encoder.copy_buffer_to_buffer(
                                         &compute_pipeline.output_buffer.buffer,
                                         0,
-                                        &temp_buffer,
+                                        temp_buffer,
                                         0,
                                         compute_pipeline.output_buffer.buffer.size(),
                                     );
@@ -459,14 +459,13 @@ impl State {
                         });
                 }
 
-                if self
+                if !self
                     .graphics
                     .engine
                     .render_context
                     .post_processing
                     .post_processes
-                    .len()
-                    > 0
+                    .is_empty()
                 {
                     let mut post_processes = self
                         .graphics
@@ -641,11 +640,10 @@ impl State {
                     };
 
                     let full_output = self.egui_renderer.start_gui(&self.window, |ui| {
-                        game.gui_setup(dt, &mut self.graphics, ui);
+                        _game.gui_setup(_dt, &mut self.graphics, ui);
                     });
                     self.egui_renderer.end_frame_and_draw(
-                        &self.graphics.engine.render_context.device,
-                        &self.graphics.engine.render_context.queue,
+                        &self.graphics.engine.render_context,
                         &mut encoder,
                         &self.window,
                         &view,

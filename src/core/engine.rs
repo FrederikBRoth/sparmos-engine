@@ -122,16 +122,12 @@ pub struct Engine {
 
 impl Engine {
     pub(crate) fn change_shader_inner(&mut self, material: &MaterialHandle, shader: &str) {
-        if let Some(material) = self
-            .render_context
-            .gpu_objects
-            .materials
-            .get_mut(material.clone())
+        if let Some(material) = self.render_context.gpu_objects.materials.get_mut(*material)
             && let Some(shader) = self.render_context.shaders.get(shader)
         {
             material.change_shader(
                 &self.render_context.device,
-                self.render_context.config.format.clone(),
+                self.render_context.config.format,
                 shader,
             );
         }

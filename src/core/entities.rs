@@ -6,17 +6,14 @@ pub struct World {
 
 impl World {
     pub fn new(entities: hecs::World) -> Self {
-        Self { entities: entities }
+        Self { entities }
     }
 
     #[inline]
     pub fn add_entity<B: DynamicBundle>(&mut self, bundle: B) -> Entity {
         self.entities.spawn(bundle)
     }
-    pub fn query_first<B: Query>(&self, f: impl for<'a> FnOnce(<B as Query>::Item<'a>))
-    where
-        B: Query,
-    {
+    pub fn query_first<B: Query>(&self, f: impl for<'a> FnOnce(<B as Query>::Item<'a>)) {
         let entities = &self.entities;
 
         let mut query = entities.query::<B>();
@@ -40,10 +37,7 @@ impl World {
     //         f(&mut self.resources, item);
     //     }
     // }
-    pub fn query<B: Query>(&self, f: impl for<'a> FnOnce(QueryBorrow<'a, B>))
-    where
-        B: Query,
-    {
+    pub fn query<B: Query>(&self, f: impl for<'a> FnOnce(QueryBorrow<'a, B>)) {
         let entities = &self.entities;
 
         let query = entities.query::<B>();

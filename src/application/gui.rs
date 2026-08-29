@@ -1,9 +1,11 @@
 use egui::{Context, FullOutput, Ui, ViewportId};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 use egui_winit::State;
-use wgpu::{CommandEncoder, Device, Queue, StoreOp, TextureFormat, TextureView};
+use wgpu::{CommandEncoder, Device, StoreOp, TextureFormat, TextureView};
 use winit::event::WindowEvent;
 use winit::window::Window;
+
+use crate::core::render::RenderContext;
 
 pub struct EguiRenderer {
     state: State,
@@ -71,8 +73,7 @@ impl EguiRenderer {
 
     pub fn end_frame_and_draw(
         &mut self,
-        device: &Device,
-        queue: &Queue,
+        rc: &RenderContext,
         encoder: &mut CommandEncoder,
         window: &Window,
         window_surface_view: &TextureView,
@@ -94,10 +95,10 @@ impl EguiRenderer {
             .tessellate(full_output.shapes, self.state.egui_ctx().pixels_per_point());
         for (id, image_delta) in &full_output.textures_delta.set {
             self.renderer
-                .update_texture(device, queue, *id, image_delta.get(0).unwrap());
+                .update_texture(&rc.device, &rc.queue, *id, image_delta.first().unwrap());
         }
         self.renderer
-            .update_buffers(device, queue, encoder, &tris, &screen_descriptor);
+            .update_buffers(&rc.device, &rc.queue, encoder, &tris, &screen_descriptor);
         let rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: window_surface_view,

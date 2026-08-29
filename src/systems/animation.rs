@@ -18,7 +18,7 @@ pub fn get_height_color(height: f32) -> Vector3<f32> {
 }
 pub fn castaljau_point(points: &[egui::Pos2], t: f32) -> egui::Pos2 {
     if points.len() == 1 {
-        return points[0];
+        points[0]
     } else {
         let mut new_points: Vec<egui::Pos2> = Vec::with_capacity(points.len() - 1);
         for i in 0..points.len() - 1 {
@@ -74,7 +74,7 @@ impl Interpolation {
                 1.0 - (1.0 - t).powi(3)
             }
             Interpolation::Linear => t.clamp(0.0, 1.0),
-            Interpolation::Custom(point2s) => castaljau_point(&point2s, t).x,
+            Interpolation::Custom(point2s) => castaljau_point(point2s, t).x,
         }
     }
     pub fn lerp(&self, t: f32, reversed: bool) -> (f32, f32) {
@@ -112,7 +112,7 @@ impl Interpolation {
                 if reversed { (1.0 - x, 0.0) } else { (x, 0.0) }
             }
             Interpolation::Custom(point2s) => {
-                let point = castaljau_point(&point2s, t);
+                let point = castaljau_point(point2s, t);
                 (point.x, point.y)
             }
         }
@@ -243,7 +243,7 @@ impl Animation {
             offset += s.update(dt);
 
             if s.is_finished() {
-                self.base_position = self.base_position + offset;
+                self.base_position += offset;
                 offset = Vector3::new(0.0, 0.0, 0.0);
             }
         }

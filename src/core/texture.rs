@@ -409,9 +409,9 @@ pub enum TextureType {
 }
 
 pub(crate) struct TextureDepth {
-    pub texture: wgpu::Texture,
+    pub _texture: wgpu::Texture,
     pub view: wgpu::TextureView,
-    pub sampler: wgpu::Sampler,
+    pub _sampler: wgpu::Sampler,
 }
 
 impl Texture {
@@ -455,9 +455,9 @@ impl Texture {
         });
 
         TextureDepth {
-            texture,
+            _texture: texture,
             view,
-            sampler,
+            _sampler: sampler,
         }
     }
 }
@@ -722,23 +722,33 @@ fn cubemap_capture_matrices_with_parameters(
     })
 }
 
-fn render_cubemap_faces(
-    render_context: &RenderContext,
-    input: &TextureDefinition,
-    input_dimension: wgpu::TextureViewDimension,
-    shader_name: &str,
+pub struct CubemapRenderConfig {
     face_size: u32,
     mip_level_count: u32,
     rendered_mip_level_count: u32,
     roughness_per_mip: bool,
     source_resolution: f32,
+}
+fn render_cubemap_faces(
+    render_context: &RenderContext,
+    input: &TextureDefinition,
+    input_dimension: wgpu::TextureViewDimension,
+    shader_name: &str,
+    cubemap_config: CubemapRenderConfig,
     label: Option<&str>,
     address_mode_u: wgpu::AddressMode,
 ) -> Result<TextureDefinition> {
     let device = &render_context.device;
     let queue = &render_context.queue;
-    let target = create_renderable_cubemap_with_mips(device, face_size, mip_level_count, label)?;
-    if rendered_mip_level_count == 0 || rendered_mip_level_count > mip_level_count {
+    let target = create_renderable_cubemap_with_mips(
+        device,
+        cubemap_config.face_size,
+        cubemap_config.mip_level_count,
+        label,
+    )?;
+    if cubemap_config.rendered_mip_level_count == 0
+        || cubemap_config.rendered_mip_level_count > cubemap_config.mip_level_count
+    {
         bail!("Rendered cubemap mip count must fit inside the target mip chain");
     }
     let input_binding = TextureBinding::new(
@@ -752,14 +762,15 @@ fn render_cubemap_faces(
         Some("cubemap capture input"),
     );
 
-    let capture_uniforms = (0..rendered_mip_level_count)
+    let capture_uniforms = (0..cubemap_config.rendered_mip_level_count)
         .map(|mip_level| {
-            let roughness = if roughness_per_mip && mip_level_count > 1 {
-                mip_level as f32 / (mip_level_count - 1) as f32
-            } else {
-                0.0
-            };
-            cubemap_capture_matrices_with_parameters(roughness, source_resolution)
+            let roughness =
+                if cubemap_config.roughness_per_mip && cubemap_config.mip_level_count > 1 {
+                    mip_level as f32 / (cubemap_config.mip_level_count - 1) as f32
+                } else {
+                    0.0
+                };
+            cubemap_capture_matrices_with_parameters(roughness, cubemap_config.source_resolution)
         })
         .collect::<Vec<_>>();
     let uniform_buffer_type = || BufferType::UniformBuffer(UniformParameters::default());
@@ -808,12 +819,12 @@ fn render_cubemap_faces(
         usage: wgpu::BufferUsages::VERTEX,
     });
 
-    let mip_face_views = (0..rendered_mip_level_count)
+    let mip_face_views = (0..cubemap_config.rendered_mip_level_count)
         .map(|mip_level| cubemap_face_views(&target.texture, mip_level, label))
         .collect::<Vec<_>>();
-    let depth_targets = (0..rendered_mip_level_count)
+    let depth_targets = (0..cubemap_config.rendered_mip_level_count)
         .map(|mip_level| {
-            let mip_size = (face_size >> mip_level).max(1);
+            let mip_size = (cubemap_config.face_size >> mip_level).max(1);
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("cubemap capture depth"),
                 size: wgpu::Extent3d {
@@ -834,7 +845,7 @@ fn render_cubemap_faces(
         .collect::<Vec<_>>();
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-    for mip_level in 0..rendered_mip_level_count as usize {
+    for mip_level in 0..cubemap_config.rendered_mip_level_count as usize {
         for (face, face_view) in mip_face_views[mip_level].iter().enumerate() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label,
@@ -1018,11 +1029,13 @@ fn render_equirectangular_to_cubemap(
         hdri,
         wgpu::TextureViewDimension::D2,
         "equirectangular_to_cubemap",
-        face_size,
-        mip_level_count,
-        1,
-        false,
-        1.0,
+        CubemapRenderConfig {
+            face_size,
+            mip_level_count,
+            rendered_mip_level_count: 1,
+            roughness_per_mip: false,
+            source_resolution: 1.0,
+        },
         label,
         wgpu::AddressMode::Repeat,
     )?;
@@ -1050,11 +1063,13 @@ fn render_irradiance_map(
         environment,
         wgpu::TextureViewDimension::Cube,
         "irradiance_convolution",
-        face_size,
-        1,
-        1,
-        false,
-        environment.texture.width() as f32,
+        CubemapRenderConfig {
+            face_size,
+            mip_level_count: 1,
+            rendered_mip_level_count: 1,
+            roughness_per_mip: false,
+            source_resolution: environment.texture.width() as f32,
+        },
         label,
         wgpu::AddressMode::ClampToEdge,
     )
@@ -1075,11 +1090,13 @@ fn render_prefiltered_environment_map(
         environment,
         wgpu::TextureViewDimension::Cube,
         "prefilter_environment",
-        face_size,
-        mip_level_count,
-        mip_level_count,
-        true,
-        environment.texture.width() as f32,
+        CubemapRenderConfig {
+            face_size,
+            mip_level_count,
+            rendered_mip_level_count: mip_level_count,
+            roughness_per_mip: true,
+            source_resolution: environment.texture.width() as f32,
+        },
         label,
         wgpu::AddressMode::ClampToEdge,
     )
@@ -1301,7 +1318,7 @@ impl<'a> TextureBuilder<'a> {
         Self {
             gfx,
             textures: vec![],
-            label: label,
+            label,
         }
     }
 
@@ -1580,7 +1597,7 @@ fn hdri_face_size(image: &image::Rgb32FImage) -> Result<u32> {
     if width == 0 || height == 0 {
         bail!("HDRI dimensions must be non-zero");
     }
-    if height.checked_mul(2) != Some(width) || width % 4 != 0 {
+    if height.checked_mul(2) != Some(width) || !width.is_multiple_of(4) {
         bail!("HDRI must use a 2:1 equirectangular projection");
     }
 

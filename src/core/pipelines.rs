@@ -338,10 +338,15 @@ impl<'a> MaterialBuilder<'a> {
         }
         let mut bind_group_layouts = Vec::new();
 
-        for system in self.graphics.engine.systems.get_bind_group_layouts() {
-            if let Some(layout) = system {
-                bind_group_layouts.push(layout.clone());
-            }
+        for layout in self
+            .graphics
+            .engine
+            .systems
+            .get_bind_group_layouts()
+            .into_iter()
+            .flatten()
+        {
+            bind_group_layouts.push(layout.clone());
         }
         for texture in self.textures.iter() {
             bind_group_layouts.push(texture.bind_group_layout.clone());
@@ -489,7 +494,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
             .unwrap();
 
         let render_buffer = compute.render_buffer.clone();
-        let length = compute.length.clone();
+        let length = compute.length;
         let key = self.key();
 
         // Reuse existing ComputeRendering

@@ -1,10 +1,9 @@
-use std::{any::TypeId, cell::Ref};
+use std::cell::Ref;
 
 use cgmath::{
     EuclideanSpace, InnerSpace, Point3, Quaternion, Rad, Rotation, Rotation3, SquareMatrix,
     Vector3, Vector4,
 };
-use wgpu::{BindGroupLayout, Device};
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, KeyEvent, WindowEvent},
@@ -18,7 +17,6 @@ use crate::{
         engine::System,
         entities::World,
         render::RenderContext,
-        resource::BufferHandle,
     },
     helpers::line_trace::OPENGL_TO_WGPU_MATRIX,
     systems::animation::{AnimationHandler, AnimationType},

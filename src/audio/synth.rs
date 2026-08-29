@@ -77,12 +77,13 @@ impl Envelope {
     pub fn update(&mut self) -> f32 {
         match self.audio_state {
             AudioState::Playing => {
-                let t = self.elapsed as f32;
+                let t = self.elapsed;
 
                 let attack_end = self.attack.length;
                 let decay_end = attack_end + self.decay.length;
                 //Attack
-                let value = if t < attack_end {
+
+                if t < attack_end {
                     let x = t / self.attack.length;
                     let interp = self.attack.interpolation.lerp(x, false);
                     self.prev_gain + (1.0 - self.prev_gain) * interp.0
@@ -94,15 +95,14 @@ impl Envelope {
                 //Sustain
                 } else {
                     self.sustain
-                };
-
-                value
+                }
             }
             AudioState::Stopping => {
-                let t = self.elapsed as f32;
+                let t = self.elapsed;
 
                 //Refrain
-                let value = if t < self.refrain.length {
+
+                if t < self.refrain.length {
                     let x = t / self.refrain.length;
                     let interp = self.refrain.interpolation.lerp(x, false);
 
@@ -110,9 +110,7 @@ impl Envelope {
                 } else {
                     self.audio_state = AudioState::Stopped;
                     0.0
-                };
-
-                value
+                }
             }
             AudioState::Stopped => 0.0,
         }

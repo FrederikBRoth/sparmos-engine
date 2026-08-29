@@ -13,6 +13,7 @@ use crate::{
     core::render::ComputeHandle,
     systems::compute::ReadbackState,
 };
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -270,7 +271,7 @@ where
                                 ReadbackState::Available => {
                                     compute.readback_status = ReadbackState::Pending;
                                     readback(
-                                        &compute.temp_buffer.as_ref().unwrap(),
+                                        compute.temp_buffer.as_ref().unwrap(),
                                         *compute_handle,
                                         &self.proxy.clone().unwrap(),
                                     );
@@ -361,10 +362,7 @@ pub fn readback<U: Send + 'static>(
             let data = slice.get_mapped_range();
 
             let _ = proxy.send_event(UserEvent::EngineEvent(EngineEvent::ComputeResult(
-                ComputePackage {
-                    data,
-                    handle: handle,
-                },
+                ComputePackage { data, handle },
             )));
         }
 

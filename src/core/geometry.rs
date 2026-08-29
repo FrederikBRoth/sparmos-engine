@@ -7,11 +7,8 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     application::graphics::Graphics,
-    core::{
-        render::{
-            InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext, TextureHandle,
-        },
-        texture::Texture,
+    core::render::{
+        InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext, TextureHandle,
     },
 };
 
@@ -321,11 +318,11 @@ impl<'a> ModelBuilder<'a> {
         self
     }
 
-    pub fn build(mut self) -> Model {
+    pub fn build(self) -> Model {
         let model = Model::load_obj(
             self.data,
             self.mtl_data,
-            &mut self.gfx,
+            self.gfx,
             self.texture_material,
             self.primitive_material,
             self.instance,
@@ -376,7 +373,7 @@ impl Model {
         let mut vertices = Vec::<(MeshHandle, Option<TextureHandle>)>::new();
 
         let mut texture_list = Vec::<TextureHandle>::new();
-        if let Some(materials) = materials.ok() {
+        if let Ok(materials) = materials {
             for material in materials {
                 let texture = gfx
                     .texture(&material.name)
@@ -406,16 +403,16 @@ impl Model {
             let texture_handle = if let Some(id) = model.mesh.material_id
                 && let Some(handle) = texture_list.get(id)
             {
-                Some(handle.clone())
+                Some(*handle)
             } else {
                 None
             };
-            if primitive_material_handle.is_some() {
+            if let Some(primitive_material_handle) = primitive_material_handle {
                 let mesh_handle = Primitive::try_from(model)
                     .unwrap()
                     .make_mb(gfx.get_render_context_mut());
                 vertices.push((mesh_handle, texture_handle));
-                let material = primitive_material_handle.unwrap();
+                let material = primitive_material_handle;
                 materials.insert(mesh_handle, material);
             } else {
                 let mesh_handle = Textured::try_from(model)
@@ -436,7 +433,7 @@ impl Model {
         Some(Self {
             meshes: vertices,
             instance: instance_handle,
-            materials: materials,
+            materials,
         })
     }
 }
@@ -447,7 +444,7 @@ impl TryFrom<tobj::Model> for Textured {
     fn try_from(model: tobj::Model) -> Result<Self, Self::Error> {
         let mesh = model.mesh;
 
-        if mesh.positions.len() % 3 != 0 {
+        if !mesh.positions.len().is_multiple_of(3) {
             return Err("OBJ positions are not a multiple of 3");
         }
 
@@ -506,7 +503,7 @@ impl TryFrom<tobj::Model> for Primitive {
     fn try_from(model: tobj::Model) -> Result<Self, Self::Error> {
         let mesh = model.mesh;
 
-        if mesh.positions.len() % 3 != 0 {
+        if !mesh.positions.len().is_multiple_of(3) {
             return Err("OBJ positions are not a multiple of 3");
         }
 
