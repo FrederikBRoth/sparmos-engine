@@ -81,16 +81,20 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                     self.set_pipeline(&material.pipeline);
                     let mesh = &scene.meshes[mesh];
 
-                    // if let Some(texture_handle) = texture {
-                    //     let texture = &scene.textures[texture_handle];
-                    //     self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
-                    //     bind_group_id += 1;
-                    // }
-
-                    for texture in &material.texture {
+                    if let Some(texture_handle) = texture {
+                        let texture = &scene.textures[texture_handle];
                         self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
                         bind_group_id += 1;
                     }
+
+                    let texture = &material.texture[1];
+                    self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
+                    bind_group_id += 1;
+
+                    // for texture in &material.texture {
+                    //     self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
+                    //     bind_group_id += 1;
+                    // }
 
                     for buffers in &material.buffers {
                         self.set_bind_group(bind_group_id, &buffers.1.bind_group, &[]);

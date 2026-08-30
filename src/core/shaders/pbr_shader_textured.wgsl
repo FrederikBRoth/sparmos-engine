@@ -125,13 +125,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         metallic_map,
         texture_sampler,
         in.uv
-    ).r;
+    ).b;
 
     let roughness = clamp(textureSample(
         roughness_map,
         texture_sampler,
         in.uv
-    ).r, 0.04, 1.0);
+    ).g, 0.04, 1.0);
 
     let ao = textureSample(
         ao_map,

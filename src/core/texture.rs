@@ -182,7 +182,13 @@ impl TextureDefinition {
         label: Option<&str>,
         format: TextureFormat,
     ) -> Result<Self> {
-        let rgba = img.to_rgba8();
+        let converted;
+        let rgba = if let Some(rgba) = img.as_rgba8() {
+            rgba
+        } else {
+            converted = img.to_rgba8();
+            &converted
+        };
         let dimensions = img.dimensions();
 
         let size = wgpu::Extent3d {
@@ -204,7 +210,7 @@ impl TextureDefinition {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         queue.write_texture(
             texture.as_image_copy(),
-            &rgba,
+            rgba.as_raw(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(dimensions.0 * 4),
