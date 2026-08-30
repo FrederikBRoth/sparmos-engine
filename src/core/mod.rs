@@ -3,6 +3,7 @@ pub mod engine;
 pub mod entities;
 pub mod geometry;
 pub mod instance;
+pub mod object_loading;
 pub mod pbr;
 pub mod pipelines;
 pub mod post_processing;

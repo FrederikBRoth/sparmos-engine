@@ -8,8 +8,9 @@ use crate::{
     core::{
         engine::Engine,
         entities::World,
-        geometry::{Mesh, Model},
+        geometry::Mesh,
         instance::InstanceControllerTrait,
+        object_loading::model::Model,
         pipelines::{ComputeRendering, ComputeRenderingKey, Material, MaterialKey},
         post_processing::PostProcessHandler,
         texture::{Texture, TextureDepth},
@@ -80,8 +81,13 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                     self.set_pipeline(&material.pipeline);
                     let mesh = &scene.meshes[mesh];
 
-                    if let Some(texture_handle) = texture {
-                        let texture = &scene.textures[texture_handle];
+                    // if let Some(texture_handle) = texture {
+                    //     let texture = &scene.textures[texture_handle];
+                    //     self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
+                    //     bind_group_id += 1;
+                    // }
+
+                    for texture in &material.texture {
                         self.set_bind_group(bind_group_id, &texture.bind_group, &[]);
                         bind_group_id += 1;
                     }

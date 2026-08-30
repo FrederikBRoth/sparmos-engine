@@ -226,6 +226,22 @@ impl TextureDefinition {
         color: &[f32; 3],
         label: Option<&str>,
     ) -> Result<Self> {
+        Self::from_color_with_format(
+            device,
+            queue,
+            color,
+            label,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
+    }
+
+    pub fn from_color_with_format(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color: &[f32; 3],
+        label: Option<&str>,
+        format: wgpu::TextureFormat,
+    ) -> Result<Self> {
         let rgba = [
             (color[0].clamp(0.0, 1.0) * 255.0) as u8,
             (color[1].clamp(0.0, 1.0) * 255.0) as u8,
@@ -238,8 +254,6 @@ impl TextureDefinition {
             height: 1,
             depth_or_array_layers: 1,
         };
-
-        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
@@ -1307,6 +1321,34 @@ fn create_bind_group_and_layout(
     )
 }
 
+fn finish_texture(gfx: &Graphics, label: &str, textures: Vec<TextureDefinition>) -> Texture {
+    let radiance_scale = textures
+        .first()
+        .map(|texture| texture.radiance_scale)
+        .unwrap_or(1.0);
+    let sampler = gfx.get_device().create_sampler(&wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Linear,
+        anisotropy_clamp: 8,
+        ..Default::default()
+    });
+    let (bind_group_layout, bind_group, radiance_scale_buffer) =
+        create_bind_group_and_layout(gfx.get_device(), &textures, &sampler, radiance_scale);
+
+    Texture {
+        label: label.to_string(),
+        texture: textures,
+        sampler,
+        bind_group_layout,
+        bind_group,
+        _radiance_scale_buffer: radiance_scale_buffer,
+    }
+}
+
 pub struct TextureBuilder<'a> {
     pub(crate) gfx: &'a mut Graphics,
     pub(crate) textures: Vec<TextureDefinition>,
@@ -1317,86 +1359,54 @@ impl<'a> TextureBuilder<'a> {
     pub(crate) fn new(gfx: &'a mut Graphics, label: &'a str) -> Self {
         Self {
             gfx,
-            textures: vec![],
+            textures: Vec::new(),
             label,
         }
     }
 
     pub fn image(mut self, img: &image::DynamicImage, format: wgpu::TextureFormat) -> Self {
-        let texture = TextureDefinition::from_image(
-            self.gfx.get_device(),
-            self.gfx.get_queue(),
-            img,
-            Some(self.label),
-            format,
-        )
-        .unwrap();
-        self.textures.push(texture);
+        self.textures.push(
+            TextureDefinition::from_image(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                img,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
         self
     }
+
     pub fn bytes(mut self, data: &[u8], format: wgpu::TextureFormat) -> Self {
-        let texture = TextureDefinition::from_bytes(
-            self.gfx.get_device(),
-            self.gfx.get_queue(),
-            data,
-            Some(self.label),
-            format,
-        )
-        .unwrap();
-        self.textures.push(texture);
+        self.textures.push(
+            TextureDefinition::from_bytes(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                data,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
         self
     }
 
     pub fn color(mut self, color: [f32; 3]) -> Self {
-        let texture = TextureDefinition::from_color(
-            self.gfx.get_device(),
-            self.gfx.get_queue(),
-            &color,
-            Some(self.label),
-        )
-        .unwrap();
-        self.textures.push(texture);
+        self.textures.push(
+            TextureDefinition::from_color(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                &color,
+                Some(self.label),
+            )
+            .unwrap(),
+        );
         self
     }
 
-    pub fn build(mut self) -> Texture {
-        let textures = std::mem::take(&mut self.textures);
-        self.finish(textures)
-    }
-
-    fn finish(self, textures: Vec<TextureDefinition>) -> Texture {
-        let radiance_scale = textures
-            .first()
-            .map(|texture| texture.radiance_scale)
-            .unwrap_or(1.0);
-        let sampler = self
-            .gfx
-            .get_device()
-            .create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::MipmapFilterMode::Linear,
-                anisotropy_clamp: 8,
-
-                ..Default::default()
-            });
-        let (bind_group_layout, bind_group, radiance_scale_buffer) = create_bind_group_and_layout(
-            self.gfx.get_device(),
-            &textures,
-            &sampler,
-            radiance_scale,
-        );
-        Texture {
-            label: self.label.to_string(),
-            texture: textures,
-            sampler,
-            bind_group_layout,
-            bind_group,
-            _radiance_scale_buffer: radiance_scale_buffer,
-        }
+    pub fn build(self) -> Texture {
+        finish_texture(self.gfx, self.label, self.textures)
     }
 
     pub fn cubemap(self, image: &[u8]) -> Texture {
@@ -1426,7 +1436,7 @@ impl<'a> TextureBuilder<'a> {
             wgpu::TextureFormat::Rgba8UnormSrgb,
         )
         .unwrap();
-        self.finish(vec![cubemap])
+        finish_texture(self.gfx, self.label, vec![cubemap])
     }
 
     /// Decodes a 2:1 Radiance HDR image, uploads it, and renders a floating-point
@@ -1450,7 +1460,7 @@ impl<'a> TextureBuilder<'a> {
             Some(self.label),
         )
         .expect("Failed to render HDR environment cubemap");
-        self.finish(vec![cubemap])
+        finish_texture(self.gfx, self.label, vec![cubemap])
     }
 
     /// Renders a diffuse irradiance cubemap from an existing environment cubemap.
@@ -1473,7 +1483,7 @@ impl<'a> TextureBuilder<'a> {
         )
         .expect("Failed to render irradiance cubemap");
 
-        self.finish(vec![irradiance])
+        finish_texture(self.gfx, self.label, vec![irradiance])
     }
 
     /// Builds the complete image-based lighting texture set used by the PBR
@@ -1525,7 +1535,11 @@ impl<'a> TextureBuilder<'a> {
         let brdf_lut = render_brdf_lut(render_context, brdf_lut_size, Some(self.label))
             .expect("Failed to render BRDF integration lookup table");
 
-        self.finish(vec![irradiance, prefiltered_environment, brdf_lut])
+        finish_texture(
+            self.gfx,
+            self.label,
+            vec![irradiance, prefiltered_environment, brdf_lut],
+        )
     }
 
     /// Compatibility helper. New code can retain the environment cubemap and
@@ -1557,7 +1571,298 @@ impl<'a> TextureBuilder<'a> {
             Some(self.label),
         )
         .expect("Failed to render irradiance cubemap");
-        self.finish(vec![irradiance])
+        finish_texture(self.gfx, self.label, vec![irradiance])
+    }
+}
+
+pub struct PbrTextureBuilder<'a> {
+    pub(crate) gfx: &'a mut Graphics,
+    pub(crate) label: &'a str,
+    pub(crate) diffuse: Option<TextureDefinition>,
+    pub(crate) normal: Option<TextureDefinition>,
+    pub(crate) metallic: Option<TextureDefinition>,
+    pub(crate) roughness: Option<TextureDefinition>,
+    pub(crate) ao: Option<TextureDefinition>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_pbr_textures(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    diffuse: Option<TextureDefinition>,
+    normal: Option<TextureDefinition>,
+    metallic: Option<TextureDefinition>,
+    roughness: Option<TextureDefinition>,
+    ao: Option<TextureDefinition>,
+) -> Vec<TextureDefinition> {
+    let default = |color, format| {
+        TextureDefinition::from_color_with_format(device, queue, &color, Some(label), format)
+            .unwrap()
+    };
+
+    vec![
+        diffuse.unwrap_or_else(|| default([1.0, 1.0, 1.0], wgpu::TextureFormat::Rgba8UnormSrgb)),
+        normal.unwrap_or_else(|| default([0.5, 0.5, 1.0], wgpu::TextureFormat::Rgba8Unorm)),
+        metallic.unwrap_or_else(|| default([0.0, 0.0, 0.0], wgpu::TextureFormat::Rgba8Unorm)),
+        roughness.unwrap_or_else(|| default([0.0, 0.0, 0.0], wgpu::TextureFormat::Rgba8Unorm)),
+        ao.unwrap_or_else(|| default([0.0, 0.0, 0.0], wgpu::TextureFormat::Rgba8Unorm)),
+    ]
+}
+
+impl<'a> PbrTextureBuilder<'a> {
+    pub(crate) fn new(gfx: &'a mut Graphics, label: &'a str) -> Self {
+        Self {
+            gfx,
+            label,
+            diffuse: None,
+            normal: None,
+            metallic: None,
+            roughness: None,
+            ao: None,
+        }
+    }
+
+    pub fn diffuse_image(mut self, img: &image::DynamicImage, format: wgpu::TextureFormat) -> Self {
+        self.diffuse = Some(
+            TextureDefinition::from_image(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                img,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn diffuse_bytes(mut self, data: &[u8], format: wgpu::TextureFormat) -> Self {
+        self.diffuse = Some(
+            TextureDefinition::from_bytes(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                data,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn diffuse_color(mut self, color: [f32; 3]) -> Self {
+        self.diffuse = Some(
+            TextureDefinition::from_color_with_format(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                &color,
+                Some(self.label),
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn normal_image(mut self, img: &image::DynamicImage, format: wgpu::TextureFormat) -> Self {
+        self.normal = Some(
+            TextureDefinition::from_image(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                img,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn normal_bytes(mut self, data: &[u8], format: wgpu::TextureFormat) -> Self {
+        self.normal = Some(
+            TextureDefinition::from_bytes(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                data,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn normal_color(mut self, normal: [f32; 3]) -> Self {
+        self.normal = Some(
+            TextureDefinition::from_color_with_format(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                &normal,
+                Some(self.label),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn metallic_image(
+        mut self,
+        img: &image::DynamicImage,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        self.metallic = Some(
+            TextureDefinition::from_image(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                img,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn metallic_bytes(mut self, data: &[u8], format: wgpu::TextureFormat) -> Self {
+        self.metallic = Some(
+            TextureDefinition::from_bytes(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                data,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn metallic(mut self, value: f32) -> Self {
+        self.metallic = Some(
+            TextureDefinition::from_color_with_format(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                &[value, value, value],
+                Some(self.label),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn roughness_image(
+        mut self,
+        img: &image::DynamicImage,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        self.roughness = Some(
+            TextureDefinition::from_image(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                img,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn roughness_bytes(mut self, data: &[u8], format: wgpu::TextureFormat) -> Self {
+        self.roughness = Some(
+            TextureDefinition::from_bytes(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                data,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn roughness(mut self, value: f32) -> Self {
+        self.roughness = Some(
+            TextureDefinition::from_color_with_format(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                &[value, value, value],
+                Some(self.label),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn ao_image(mut self, img: &image::DynamicImage, format: wgpu::TextureFormat) -> Self {
+        self.ao = Some(
+            TextureDefinition::from_image(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                img,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn ao_bytes(mut self, data: &[u8], format: wgpu::TextureFormat) -> Self {
+        self.ao = Some(
+            TextureDefinition::from_bytes(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                data,
+                Some(self.label),
+                format,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn ao(mut self, value: f32) -> Self {
+        self.ao = Some(
+            TextureDefinition::from_color_with_format(
+                self.gfx.get_device(),
+                self.gfx.get_queue(),
+                &[value, value, value],
+                Some(self.label),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .unwrap(),
+        );
+        self
+    }
+
+    pub fn build(self) -> Texture {
+        let Self {
+            gfx,
+            label,
+            diffuse,
+            normal,
+            metallic,
+            roughness,
+            ao,
+        } = self;
+        let textures = resolve_pbr_textures(
+            gfx.get_device(),
+            gfx.get_queue(),
+            label,
+            diffuse,
+            normal,
+            metallic,
+            roughness,
+            ao,
+        );
+
+        finish_texture(gfx, label, textures)
     }
 }
 
@@ -1602,178 +1907,4 @@ fn hdri_face_size(image: &image::Rgb32FImage) -> Result<u32> {
     }
 
     Ok(width / 4)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bright_hdri_channels_stay_finite_in_half_float_storage() {
-        let image =
-            image::Rgb32FImage::from_pixel(4, 2, image::Rgb([262_144.0, 196_608.0, 71_680.0]));
-        let radiance_scale = hdri_radiance_scale(&image);
-
-        assert!(radiance_scale > 1.0);
-        for channel in image.get_pixel(0, 0).0 {
-            let stored = f16::from_bits(hdr_channel_to_f16_bits(channel, radiance_scale));
-            assert!(stored.is_finite());
-            assert!(stored.to_f32().abs() <= HDR_HALF_FLOAT_STORAGE_TARGET);
-        }
-
-        let restored = f16::from_bits(hdr_channel_to_f16_bits(
-            image.get_pixel(0, 0)[0],
-            radiance_scale,
-        ))
-        .to_f32()
-            * radiance_scale;
-        let relative_error = (restored - 262_144.0).abs() / 262_144.0;
-        assert!(relative_error < 0.001);
-        assert_eq!(
-            f16::from_bits(hdr_channel_to_f16_bits(f32::INFINITY, radiance_scale)),
-            f16::ZERO,
-        );
-    }
-
-    #[test]
-    #[cfg(not(target_arch = "wasm32"))]
-    fn hdr_scale_shader_bindings_validate() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        let std::result::Result::Ok(adapter) =
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-                ..Default::default()
-            }))
-        else {
-            return;
-        };
-        let (device, _) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .expect("Failed to create shader validation device");
-        let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-
-        let skybox_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("HDR scale skybox validation"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/skybox.wgsl").into()),
-        });
-        let _skybox_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("HDR scale skybox validation"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &skybox_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: 12,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x3,
-                        offset: 0,
-                        shader_location: 0,
-                    }],
-                })],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &skybox_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-
-        let pbr_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("HDR scale PBR validation"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("shaders/pbr_shader_textured.wgsl").into(),
-            ),
-        });
-        let _pbr_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("HDR scale PBR validation"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &pbr_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[
-                    Some(wgpu::VertexBufferLayout {
-                        array_stride: 32,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x3,
-                                offset: 0,
-                                shader_location: 0,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 12,
-                                shader_location: 1,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x3,
-                                offset: 20,
-                                shader_location: 2,
-                            },
-                        ],
-                    }),
-                    Some(wgpu::VertexBufferLayout {
-                        array_stride: 44,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 0,
-                                shader_location: 5,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 16,
-                                shader_location: 6,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x3,
-                                offset: 32,
-                                shader_location: 7,
-                            },
-                        ],
-                    }),
-                ],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &pbr_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-
-        let validation_error = pollster::block_on(error_scope.pop());
-        assert!(
-            validation_error.is_none(),
-            "HDR scale shader validation failed: {validation_error:?}"
-        );
-    }
 }

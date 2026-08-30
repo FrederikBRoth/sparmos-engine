@@ -16,7 +16,7 @@ use crate::application::graphics::Graphics;
 use crate::application::gui::EguiRenderer;
 use crate::core::engine::{Arguments, Engine, EngineCommandQueue, EngineTime, Systems};
 use crate::core::entities::World;
-use crate::core::geometry::Model;
+use crate::core::object_loading::model::Model;
 use crate::core::post_processing::PostProcessHandler;
 use crate::core::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext, Renderable};
 use crate::core::resource::Resources;

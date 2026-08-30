@@ -21,7 +21,7 @@ use crate::{
         },
         render::{ComputeHandle, MaterialHandle, RenderContext, SkyboxRenderable},
         resource::BufferHandle,
-        texture::{Texture, TextureBuilder},
+        texture::{PbrTextureBuilder, Texture, TextureBuilder},
     },
     entities::meshes::Meshes,
     systems::compute::{ComputeBuilder, ReadbackState},
@@ -221,6 +221,10 @@ impl Graphics {
 
     pub fn texture<'a>(&'a mut self, label: &'a str) -> TextureBuilder<'a> {
         TextureBuilder::new(self, label)
+    }
+
+    pub fn pbr_texture<'a>(&'a mut self, label: &'a str) -> PbrTextureBuilder<'a> {
+        PbrTextureBuilder::new(self, label)
     }
 
     pub fn add_skybox(&mut self, skybox_texture: Texture) {
