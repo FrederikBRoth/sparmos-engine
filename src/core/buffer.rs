@@ -1,4 +1,8 @@
-use wgpu::{BindGroupLayoutEntry, util::DeviceExt};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use wgpu::util::DeviceExt;
+
+static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -56,25 +60,20 @@ impl Default for UniformParameters {
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct BufferKey {
-    layout: Vec<BindGroupLayoutEntry>,
+    id: u64,
+    layout: wgpu::BindGroupLayoutEntry,
 }
 
 #[derive(Clone)]
 pub struct Buffer {
     pub key: BufferKey,
-    // Multiple Buffer objects can reference the same underlying GPU buffer
-    // while having different layouts/bind groups for different pipelines.
     pub buffer: wgpu::Buffer,
-    pub bind_group_layout: wgpu::BindGroupLayout,
-    pub bind_group: wgpu::BindGroup,
+    binding_layout: wgpu::BindGroupLayoutEntry,
 }
 
 impl Buffer {
-    fn create_layout(
-        device: &wgpu::Device,
-        buffer_type: &BufferType,
-    ) -> (wgpu::BindGroupLayout, BufferKey) {
-        let entry = match buffer_type {
+    fn create_layout(buffer_type: &BufferType) -> wgpu::BindGroupLayoutEntry {
+        match buffer_type {
             BufferType::StorageBuffer(params) => wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: params.shader_stages,
@@ -98,44 +97,33 @@ impl Buffer {
                 },
                 count: None,
             },
+        }
+    }
+
+    pub(crate) fn layout_entry(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
+        wgpu::BindGroupLayoutEntry {
+            binding,
+            ..self.binding_layout
+        }
+    }
+
+    pub(crate) fn bind_group_entry(&self, binding: u32) -> wgpu::BindGroupEntry<'_> {
+        wgpu::BindGroupEntry {
+            binding,
+            resource: self.buffer.as_entire_binding(),
+        }
+    }
+
+    fn from_buffer(buffer: wgpu::Buffer, buffer_type: BufferType) -> Self {
+        let binding_layout = Self::create_layout(&buffer_type);
+        let key = BufferKey {
+            id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
+            layout: binding_layout,
         };
-
-        let entries = vec![entry];
-
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &entries,
-            label: Some("Buffer Bind Group Layout"),
-        });
-
-        let key = BufferKey { layout: entries };
-
-        (bind_group_layout, key)
-    }
-
-    fn create_bind_group(
-        device: &wgpu::Device,
-        layout: &wgpu::BindGroupLayout,
-        buffer: &wgpu::Buffer,
-    ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-            label: Some("Buffer Bind Group"),
-        })
-    }
-
-    fn from_buffer(buffer: wgpu::Buffer, device: &wgpu::Device, buffer_type: BufferType) -> Self {
-        let (bind_group_layout, key) = Self::create_layout(device, &buffer_type);
-
-        let bind_group = Self::create_bind_group(device, &bind_group_layout, &buffer);
 
         Self {
             buffer,
-            bind_group_layout,
-            bind_group,
+            binding_layout,
             key,
         }
     }
@@ -151,7 +139,7 @@ impl Buffer {
             usage: buffer_type.usage(),
         });
 
-        Self::from_buffer(buffer, device, buffer_type)
+        Self::from_buffer(buffer, buffer_type)
     }
 
     pub fn new_init_matching<T: bytemuck::Pod>(
@@ -165,13 +153,14 @@ impl Buffer {
             contents: bytemuck::cast_slice(data),
             usage: buffer_type.usage(),
         });
-        let bind_group = Self::create_bind_group(device, &template.bind_group_layout, &buffer);
 
         Self {
             buffer,
-            bind_group_layout: template.bind_group_layout.clone(),
-            bind_group,
-            key: template.key.clone(),
+            binding_layout: template.binding_layout,
+            key: BufferKey {
+                id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
+                layout: template.binding_layout,
+            },
         }
     }
 
@@ -188,11 +177,12 @@ impl Buffer {
             mapped_at_creation: false,
         });
 
-        Self::from_buffer(buffer, device, buffer_type)
+        Self::from_buffer(buffer, buffer_type)
     }
 
     pub fn from_existing(source: &Buffer, device: &wgpu::Device, buffer_type: BufferType) -> Self {
-        Self::from_buffer(source.buffer.clone(), device, buffer_type)
+        let _ = device;
+        Self::from_buffer(source.buffer.clone(), buffer_type)
     }
 
     pub fn update<T: bytemuck::Pod>(&self, queue: &wgpu::Queue, data: &[T]) {

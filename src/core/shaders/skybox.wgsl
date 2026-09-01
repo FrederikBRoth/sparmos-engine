@@ -7,17 +7,17 @@ struct CameraUniform {
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
 
-@group(2) @binding(0)
+@group(1) @binding(0)
 var skybox: texture_cube<f32>;
 
-@group(2) @binding(1)
+@group(1) @binding(1)
 var skybox_sampler: sampler;
 
 struct TextureParameters {
     values: vec4<f32>,
 };
 
-@group(2) @binding(2)
+@group(1) @binding(2)
 var<uniform> texture_parameters: TextureParameters;
 
 struct VertexOutput {

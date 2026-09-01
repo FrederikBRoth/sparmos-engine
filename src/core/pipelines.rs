@@ -1,6 +1,5 @@
-use indexmap::IndexMap;
 use log::warn;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use wgpu::{
     BindGroup, BindGroupLayout, Device, PipelineLayout, RenderPipeline, ShaderModule, TextureFormat,
 };
@@ -8,7 +7,8 @@ use wgpu::{
 use crate::{
     application::graphics::Graphics,
     core::{
-        buffer::{Buffer, BufferKey, BufferType, UniformParameters},
+        binding::{BindGroupBuilder, MaterialBindingKey},
+        buffer::{Buffer, BufferType, UniformParameters},
         geometry::{Vertex, VertexBufferLayoutOwned, VertexLayoutKey},
         render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle, RenderContext},
         resource::BufferHandle,
@@ -28,7 +28,7 @@ pub struct RenderPipelineBuilder<'a> {
     shader: Option<&'a ShaderModule>,
     shader_name: Option<String>,
     label: String,
-    bind_group_layouts: Vec<BindGroupLayout>,
+    bind_group_layouts: BTreeMap<u32, BindGroupLayout>,
     vertex_layouts: Vec<VertexBufferLayoutOwned>,
     config: PipelineConfig,
     primitive: wgpu::PrimitiveState,
@@ -62,7 +62,7 @@ impl<'a> RenderPipelineBuilder<'a> {
             shader,
             shader_name: None,
             label: label.to_string(),
-            bind_group_layouts: Vec::new(),
+            bind_group_layouts: BTreeMap::new(),
             vertex_layouts: Vec::new(),
             config: PipelineConfig::default(),
             primitive: wgpu::PrimitiveState::default(),
@@ -86,8 +86,13 @@ impl<'a> RenderPipelineBuilder<'a> {
         self
     }
 
-    pub fn bind_group_layout(mut self, layout: &BindGroupLayout) -> Self {
-        self.bind_group_layouts.push(layout.clone());
+    pub fn bind_group_layout(mut self, group: u32, layout: &BindGroupLayout) -> Self {
+        assert!(
+            self.bind_group_layouts
+                .insert(group, layout.clone())
+                .is_none(),
+            "duplicate pipeline bind group layout at group {group}"
+        );
         self
     }
 
@@ -132,12 +137,19 @@ impl<'a> RenderPipelineBuilder<'a> {
             .config
             .target_format
             .expect("Render pipeline target format must be configured");
-        let bind_group_layouts = self.bind_group_layouts.iter().map(Some).collect::<Vec<_>>();
+        let group_count = self
+            .bind_group_layouts
+            .last_key_value()
+            .map(|(&group, _)| group as usize + 1)
+            .unwrap_or(0);
+        let pipeline_layouts = (0..group_count)
+            .map(|group| self.bind_group_layouts.get(&(group as u32)))
+            .collect::<Vec<_>>();
         let pipeline_layout = self.pipeline_layout.unwrap_or_else(|| {
             self.device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some(&self.label),
-                    bind_group_layouts: &bind_group_layouts,
+                    bind_group_layouts: &pipeline_layouts,
                     ..Default::default()
                 })
         });
@@ -195,8 +207,7 @@ impl<'a> RenderPipelineBuilder<'a> {
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct MaterialKey {
-    pub buffers: Vec<BufferKey>,
-    pub textures: Vec<String>,
+    pub(crate) bindings: Vec<MaterialBindingKey>,
     pub vertex_layout: VertexLayoutKey,
     pub instance_layout: VertexLayoutKey,
     pub shader: String,
@@ -208,11 +219,12 @@ pub struct Material {
     pub key: MaterialKey,
     pub pipeline_layout: PipelineLayout,
     pub pipeline: RenderPipeline,
-    pub texture: Vec<Texture>,
-    pub buffers: IndexMap<u32, Buffer>,
+    pub bind_groups: Vec<Option<BindGroup>>,
     pub ic_buffer_layout: VertexBufferLayoutOwned,
     pub mesh_buffer_layout: VertexBufferLayoutOwned,
-    pub compute_bind_group: Option<BindGroup>,
+    bind_group_layouts: Vec<Option<BindGroupLayout>>,
+    binding_layout_entries: Vec<Option<Vec<wgpu::BindGroupLayoutEntry>>>,
+    bindings: BindGroupBuilder,
 }
 
 impl Material {
@@ -225,6 +237,37 @@ impl Material {
             .existing_pipeline_layout(&self.pipeline_layout)
             .build();
         self.pipeline = state.pipeline;
+    }
+
+    pub(crate) fn with_texture(
+        &self,
+        device: &Device,
+        texture: &Texture,
+        group: u32,
+        start_binding: u32,
+    ) -> Self {
+        let mut bindings = self.bindings.clone();
+        register_texture_bundle(&mut bindings, texture, group, start_binding, true);
+        let bind_groups = bindings.build_with_layouts(
+            device,
+            &self.bind_group_layouts,
+            &self.binding_layout_entries,
+            "derived material bind group",
+        );
+        let mut key = self.key.clone();
+        key.bindings = bindings.keys();
+
+        Self {
+            key,
+            pipeline_layout: self.pipeline_layout.clone(),
+            pipeline: self.pipeline.clone(),
+            bind_groups,
+            ic_buffer_layout: self.ic_buffer_layout.clone(),
+            mesh_buffer_layout: self.mesh_buffer_layout.clone(),
+            bind_group_layouts: self.bind_group_layouts.clone(),
+            binding_layout_entries: self.binding_layout_entries.clone(),
+            bindings,
+        }
     }
 }
 
@@ -248,32 +291,17 @@ impl Default for PipelineConfig {
 }
 pub struct MaterialBuilder<'a> {
     pub(crate) graphics: &'a mut Graphics,
-    pub(crate) buffers: IndexMap<u32, Buffer>,
-    pub(crate) textures: Vec<Texture>,
+    pub(crate) bindings: BindGroupBuilder,
     pub(crate) shader: String,
     pub(crate) vertex_layout: VertexBufferLayoutOwned,
     pub(crate) instance_layout: VertexBufferLayoutOwned,
-    pub(crate) compute_render_buffer: Option<Buffer>,
     pub(crate) config: PipelineConfig,
 }
 
 impl<'a> MaterialBuilder<'a> {
-    fn key(&self) -> MaterialKey {
-        let texture_key = self
-            .textures
-            .iter()
-            .map(|texture| texture.label.clone())
-            .collect();
-
-        let buffers = self
-            .buffers
-            .values()
-            .map(|buffer| buffer.key.clone())
-            .collect::<Vec<BufferKey>>();
-
+    fn key(&self, bindings: &BindGroupBuilder) -> MaterialKey {
         MaterialKey {
-            buffers,
-            textures: texture_key,
+            bindings: bindings.keys(),
             vertex_layout: self.vertex_layout.key(),
             instance_layout: self.instance_layout.key(),
             shader: self.shader.clone(),
@@ -287,22 +315,21 @@ impl<'a> MaterialBuilder<'a> {
         self
     }
 
-    pub fn buffer(mut self, handle: u32, buffer: Buffer) -> Self {
-        self.buffers.insert(handle, buffer);
+    pub fn buffer(mut self, buffer: &Buffer, bind_group: u32, binding: u32) -> Self {
+        self.bindings.buffer(buffer, bind_group, binding);
         self
     }
 
-    pub fn compute_buffer(mut self, handle: ComputeHandle) -> Self {
-        self.compute_render_buffer = Some(
-            self.graphics
-                .engine
-                .render_context
-                .gpu_objects
-                .get_compute_mut(handle)
-                .unwrap()
-                .render_buffer
-                .clone(),
-        );
+    pub fn buffer_handle(mut self, handle: BufferHandle, bind_group: u32, binding: u32) -> Self {
+        let buffer = self.graphics.engine.resources.buffers.get(handle).unwrap();
+        self.bindings.buffer(buffer, bind_group, binding);
+        self
+    }
+
+    pub fn compute_buffer(mut self, handle: ComputeHandle, bind_group: u32, binding: u32) -> Self {
+        let buffer =
+            &self.graphics.engine.render_context.gpu_objects.computes[handle].render_buffer;
+        self.bindings.buffer(buffer, bind_group, binding);
         self
     }
 
@@ -311,19 +338,86 @@ impl<'a> MaterialBuilder<'a> {
         self
     }
 
-    pub fn texture_from_color(mut self, color: [f32; 3], label: &str) -> Self {
+    pub fn texture_from_color(
+        mut self,
+        color: [f32; 3],
+        label: &str,
+        bind_group: u32,
+        start_binding: u32,
+    ) -> Self {
         let texture = self.graphics.texture(label).color(color).build();
-        self.textures.push(texture);
+        register_texture_bundle(
+            &mut self.bindings,
+            &texture,
+            bind_group,
+            start_binding,
+            false,
+        );
         self
     }
 
-    pub fn texture(mut self, texture: Texture) -> Self {
-        self.textures.push(texture);
+    pub fn texture(mut self, texture: &Texture, bind_group: u32, start_binding: u32) -> Self {
+        register_texture_bundle(
+            &mut self.bindings,
+            texture,
+            bind_group,
+            start_binding,
+            false,
+        );
         self
     }
 
-    pub fn build(self) -> MaterialHandle {
-        let key = self.key();
+    pub fn texture_view(
+        mut self,
+        texture: &Texture,
+        texture_index: usize,
+        bind_group: u32,
+        binding: u32,
+    ) -> Self {
+        let definition = texture.texture.get(texture_index).unwrap_or_else(|| {
+            panic!(
+                "texture '{}' has no view at index {texture_index}",
+                texture.label
+            )
+        });
+        self.bindings.texture_view(
+            &definition.view,
+            texture.id,
+            texture_index as u32,
+            definition.view_dimension(),
+            texture.sample_type,
+            texture.visibility,
+            bind_group,
+            binding,
+        );
+        self
+    }
+
+    pub fn sampler(mut self, texture: &Texture, bind_group: u32, binding: u32) -> Self {
+        self.bindings.sampler(
+            &texture.sampler,
+            texture.id,
+            texture.sampler_binding_type,
+            texture.visibility,
+            bind_group,
+            binding,
+        );
+        self
+    }
+
+    pub fn texture_parameters(mut self, texture: &Texture, bind_group: u32, binding: u32) -> Self {
+        self.bindings
+            .buffer(&texture.radiance_scale_buffer, bind_group, binding);
+        self
+    }
+
+    pub fn build(mut self) -> MaterialHandle {
+        for (group, binding, buffer) in self.graphics.engine.systems.get_bindings() {
+            if !self.bindings.contains_buffer(buffer) && !self.bindings.contains(group, binding) {
+                self.bindings.buffer(buffer, group, binding);
+            }
+        }
+        let key = self.key(&self.bindings);
 
         //if this material exists already, just return the existing handle
         if let Some(handle) = self
@@ -336,27 +430,9 @@ impl<'a> MaterialBuilder<'a> {
             println!("{:?} clashes with another implemented material", key);
             return handle;
         }
-        let mut bind_group_layouts = Vec::new();
-
-        for layout in self
-            .graphics
-            .engine
-            .systems
-            .get_bind_group_layouts()
-            .into_iter()
-            .flatten()
-        {
-            bind_group_layouts.push(layout.clone());
-        }
-        for texture in self.textures.iter() {
-            bind_group_layouts.push(texture.bind_group_layout.clone());
-        }
-        for buffer in self.buffers.values() {
-            bind_group_layouts.push(buffer.bind_group_layout.clone());
-        }
-        if let Some(compute_layout) = &self.compute_render_buffer {
-            bind_group_layouts.push(compute_layout.bind_group_layout.clone());
-        }
+        let built_bindings = self
+            .bindings
+            .build(self.graphics.get_device(), "material bind group");
 
         let target_format = self
             .config
@@ -369,21 +445,22 @@ impl<'a> MaterialBuilder<'a> {
                 .target_format(target_format)
                 .vertex_layout(self.vertex_layout.clone())
                 .vertex_layout(self.instance_layout.clone());
-        for layout in &bind_group_layouts {
-            pipeline_builder = pipeline_builder.bind_group_layout(layout);
+        for (group, layout) in built_bindings.layouts.iter().enumerate() {
+            if let Some(layout) = layout {
+                pipeline_builder = pipeline_builder.bind_group_layout(group as u32, layout);
+            }
         }
         let state = pipeline_builder.build();
-        let compute_bind = self.compute_render_buffer.map(|c| c.bind_group);
         let material = Material {
             key: key.clone(),
             pipeline: state.pipeline,
             pipeline_layout: state.pipeline_layout,
-            texture: self.textures.clone(),
-            //TODO FIX
-            buffers: self.buffers.clone(),
+            bind_groups: built_bindings.bind_groups,
             ic_buffer_layout: self.instance_layout,
             mesh_buffer_layout: self.vertex_layout,
-            compute_bind_group: compute_bind,
+            bind_group_layouts: built_bindings.layouts,
+            binding_layout_entries: built_bindings.layout_entries,
+            bindings: self.bindings,
         };
         let handle = self
             .graphics
@@ -402,10 +479,69 @@ impl<'a> MaterialBuilder<'a> {
     }
 }
 
+fn register_texture_bundle(
+    bindings: &mut BindGroupBuilder,
+    texture: &Texture,
+    group: u32,
+    start_binding: u32,
+    replace: bool,
+) {
+    for (index, definition) in texture.texture.iter().enumerate() {
+        let binding = start_binding + index as u32;
+        if replace {
+            bindings.replace_texture_view(
+                &definition.view,
+                texture.id,
+                index as u32,
+                definition.view_dimension(),
+                texture.sample_type,
+                texture.visibility,
+                group,
+                binding,
+            );
+        } else {
+            bindings.texture_view(
+                &definition.view,
+                texture.id,
+                index as u32,
+                definition.view_dimension(),
+                texture.sample_type,
+                texture.visibility,
+                group,
+                binding,
+            );
+        }
+    }
+
+    let sampler_binding = start_binding + texture.texture.len() as u32;
+    if replace {
+        bindings.replace_sampler(
+            &texture.sampler,
+            texture.id,
+            texture.sampler_binding_type,
+            texture.visibility,
+            group,
+            sampler_binding,
+        );
+        bindings.replace_buffer(&texture.radiance_scale_buffer, group, sampler_binding + 1);
+    } else {
+        bindings.sampler(
+            &texture.sampler,
+            texture.id,
+            texture.sampler_binding_type,
+            texture.visibility,
+            group,
+            sampler_binding,
+        );
+        bindings.buffer(&texture.radiance_scale_buffer, group, sampler_binding + 1);
+    }
+}
+
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct ComputeRenderingKey {
     pub compute: ComputeHandle,
     pub shader: String,
+    bindings: Vec<MaterialBindingKey>,
 }
 
 #[derive(Clone)]
@@ -415,8 +551,7 @@ pub struct ComputeRendering {
     pub pipeline_layout: PipelineLayout,
     pub pipeline: RenderPipeline,
     pub length: u32,
-    pub compute_bind_group: BindGroup,
-    pub input_buffers: Vec<Buffer>,
+    pub bind_groups: Vec<Option<BindGroup>>,
 }
 
 pub struct ComputeRenderingBuilder<'a> {
@@ -462,10 +597,11 @@ impl<'a> ComputeRenderingBuilder<'a> {
         self
     }
 
-    fn key(&self) -> ComputeRenderingKey {
+    fn key(&self, bindings: &BindGroupBuilder) -> ComputeRenderingKey {
         ComputeRenderingKey {
             compute: self.compute,
             shader: self.shader.clone(),
+            bindings: bindings.keys(),
         }
     }
 
@@ -495,7 +631,23 @@ impl<'a> ComputeRenderingBuilder<'a> {
 
         let render_buffer = compute.render_buffer.clone();
         let length = compute.length;
-        let key = self.key();
+        let mut bindings = BindGroupBuilder::new();
+        let system_bindings = self.graphics.engine.systems.get_bindings();
+        let mut next_group = system_bindings
+            .iter()
+            .map(|(group, _, _)| *group)
+            .max()
+            .map(|group| group + 1)
+            .unwrap_or(0);
+        for (group, binding, buffer) in system_bindings {
+            bindings.buffer(buffer, group, binding);
+        }
+        for buffer in &self.input_buffers {
+            bindings.buffer(buffer, next_group, 0);
+            next_group += 1;
+        }
+        bindings.buffer(&render_buffer, next_group, 0);
+        let key = self.key(&bindings);
 
         // Reuse existing ComputeRendering
         if let Some(handle) = self
@@ -510,17 +662,12 @@ impl<'a> ComputeRenderingBuilder<'a> {
             return handle;
         }
 
-        let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
-
-        for system in self.graphics.engine.systems.get_bind_group_layouts() {
-            bind_group_layouts.push(system);
-        }
-
-        for buffer in &self.input_buffers {
-            bind_group_layouts.push(Some(&buffer.bind_group_layout));
-        }
-
-        bind_group_layouts.push(Some(&render_buffer.bind_group_layout));
+        let built_bindings = bindings.build(device, "compute rendering bind group");
+        let bind_group_layouts = built_bindings
+            .layouts
+            .iter()
+            .map(Option::as_ref)
+            .collect::<Vec<_>>();
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Compute Rendering Pipeline Layout"),
@@ -535,8 +682,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
             length,
             pipeline_layout,
             pipeline,
-            compute_bind_group: render_buffer.bind_group,
-            input_buffers: self.input_buffers,
+            bind_groups: built_bindings.bind_groups,
         };
 
         let handle = self

@@ -89,7 +89,14 @@ pub fn load_obj(
                 .unwrap()
                 .make_mb(gfx.get_render_context_mut());
             vertices.push((mesh_handle, texture_handle));
-            let material = textured_material_handle.unwrap();
+            let base_material = textured_material_handle.unwrap();
+            let material = if let Some(texture_handle) = texture_handle {
+                let texture =
+                    gfx.engine.render_context.gpu_objects.textures[texture_handle].clone();
+                gfx.material_with_texture(base_material, &texture, 1, 0)
+            } else {
+                base_material
+            };
             materials.insert(mesh_handle, material);
         }
     }

@@ -430,20 +430,17 @@ impl State {
                                     let mut pass = encoder.begin_compute_pass(&Default::default());
 
                                     pass.set_pipeline(&compute_pipeline.pipeline);
-                                    let mut bind_group_index = 0;
-                                    for input_buffer in compute_pipeline.input_buffers.iter() {
-                                        pass.set_bind_group(
-                                            bind_group_index,
-                                            Some(&input_buffer.bind_group),
-                                            &[],
-                                        );
-                                        bind_group_index += 1;
+                                    for (group, bind_group) in
+                                        compute_pipeline.bind_groups.iter().enumerate()
+                                    {
+                                        if let Some(bind_group) = bind_group {
+                                            pass.set_bind_group(
+                                                group as u32,
+                                                Some(bind_group),
+                                                &[],
+                                            );
+                                        }
                                     }
-                                    pass.set_bind_group(
-                                        bind_group_index,
-                                        Some(&compute_pipeline.output_buffer.bind_group),
-                                        &[],
-                                    );
                                     pass.dispatch_workgroups(num_dispatches, 1, 1);
                                 }
                                 if let Some(temp_buffer) = compute_pipeline.temp_buffer.as_ref() {

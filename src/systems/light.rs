@@ -86,6 +86,10 @@ impl System for LightSystem {
         &self.storage_buffer
     }
 
+    fn binding_location(&self) -> (u32, u32) {
+        (0, 1)
+    }
+
     // fn register(self, resources: &mut Resources) {
     //     let type_id = TypeId::of::<Self>();
     //

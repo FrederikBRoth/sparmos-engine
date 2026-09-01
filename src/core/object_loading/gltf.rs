@@ -24,15 +24,13 @@ pub fn load_gltf(
     let meshes = load_meshes(gfx, &spec, &buffer_data, &image_data);
 
     let mut mesh_texture_pairs = vec![];
+    let mut materials = HashMap::new();
     for (mesh, texture_handle) in meshes {
         let mesh_handle = gfx.get_render_context_mut().gpu_objects.meshes.insert(mesh);
-
+        let texture = gfx.engine.render_context.gpu_objects.textures[texture_handle].clone();
+        let material = gfx.material_with_texture(material, &texture, 1, 0);
         mesh_texture_pairs.push((mesh_handle, Some(texture_handle)));
-    }
-
-    let mut materials = HashMap::new();
-    for (mesh, _) in mesh_texture_pairs.iter() {
-        materials.insert(*mesh, material);
+        materials.insert(mesh_handle, material);
     }
     Model {
         meshes: mesh_texture_pairs,

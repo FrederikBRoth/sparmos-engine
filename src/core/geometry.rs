@@ -1,17 +1,11 @@
-use ahash::{AHashMap, HashMap, HashMapExt};
-use std::{
-    io::{BufReader, Cursor},
-    mem,
-};
+use std::mem;
 use wgpu::util::DeviceExt;
 
 use crate::{
     application::graphics::Graphics,
     core::{
         object_loading::model::Model,
-        render::{
-            InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext, TextureHandle,
-        },
+        render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
     },
 };
 

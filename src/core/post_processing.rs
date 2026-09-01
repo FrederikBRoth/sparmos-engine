@@ -146,13 +146,13 @@ impl PostProcessHandler {
                     topology: wgpu::PrimitiveTopology::TriangleList,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None, // 👈 important for fullscreen
+                    cull_mode: None,
                     polygon_mode: wgpu::PolygonMode::Fill,
                     unclipped_depth: false,
                     conservative: false,
                 },
 
-                depth_stencil: None, // 👈 no depth for post process
+                depth_stencil: None,
 
                 multisample: wgpu::MultisampleState {
                     count: 1,

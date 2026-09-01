@@ -24,6 +24,7 @@ use crate::{
 pub trait System {
     fn run(&mut self, world: Ref<'_, World>, resources: &mut RenderContext, dt: Duration);
     fn get_buffer(&self) -> &Buffer;
+    fn binding_location(&self) -> (u32, u32);
 }
 
 impl Systems {
@@ -42,16 +43,20 @@ impl Systems {
         }
     }
 
-    pub(crate) fn get_bind_group_layouts(&self) -> Vec<Option<&wgpu::BindGroupLayout>> {
+    pub(crate) fn get_buffers(&self) -> Vec<&Buffer> {
         self.systems
             .iter()
-            .map(|resource| Some(&resource.as_ref().get_buffer().bind_group_layout))
+            .map(|resource| resource.get_buffer())
             .collect()
     }
-    pub(crate) fn get_bind_groups(&self) -> Vec<Option<&wgpu::BindGroup>> {
+
+    pub(crate) fn get_bindings(&self) -> Vec<(u32, u32, &Buffer)> {
         self.systems
             .iter()
-            .map(|resource| Some(&resource.as_ref().get_buffer().bind_group))
+            .map(|system| {
+                let (group, binding) = system.binding_location();
+                (group, binding, system.get_buffer())
+            })
             .collect()
     }
 }

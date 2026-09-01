@@ -19,42 +19,42 @@ struct LightBlock {
     light_count: u32,
 }
 
-@group(1) @binding(0)
+@group(0) @binding(1)
 var<uniform> u_lights: LightBlock;
 
-@group(2) @binding(0)
+@group(1) @binding(0)
 var albedo_map: texture_2d<f32>;
 
-@group(2) @binding(1)
+@group(1) @binding(1)
 var normal_map: texture_2d<f32>;
 
-@group(2) @binding(2)
+@group(1) @binding(2)
 var metallic_map: texture_2d<f32>;
-@group(2) @binding(3)
+@group(1) @binding(3)
 var roughness_map: texture_2d<f32>;
-@group(2) @binding(4)
+@group(1) @binding(4)
 var ao_map: texture_2d<f32>;
 
-@group(2) @binding(5)
+@group(1) @binding(5)
 var texture_sampler: sampler;
 
-@group(3) @binding(0)
+@group(2) @binding(0)
 var irradiance_map: texture_cube<f32>;
 
-@group(3) @binding(1)
+@group(2) @binding(1)
 var prefiltered_environment_map: texture_cube<f32>;
 
-@group(3) @binding(2)
+@group(2) @binding(2)
 var brdf_lut: texture_2d<f32>;
 
-@group(3) @binding(3)
+@group(2) @binding(3)
 var ibl_sampler: sampler;
 
 struct IblTextureParameters {
     values: vec4<f32>,
 };
 
-@group(3) @binding(4)
+@group(2) @binding(4)
 var<uniform> ibl_texture_parameters: IblTextureParameters;
 struct VertexInput {
     @location(0) position: vec3<f32>,

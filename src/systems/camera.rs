@@ -553,6 +553,10 @@ impl System for CameraSystem {
     fn get_buffer(&self) -> &Buffer {
         &self.camera_buffer
     }
+
+    fn binding_location(&self) -> (u32, u32) {
+        (0, 0)
+    }
     // fn register(self, resources: &mut crate::core::resource::Resources) {
     //     let type_id = TypeId::of::<Self>();
     //

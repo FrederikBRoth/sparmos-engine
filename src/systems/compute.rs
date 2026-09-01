@@ -1,8 +1,9 @@
-use wgpu::{BindGroupLayout, BufferUsages, ComputePipeline, ShaderStages};
+use wgpu::{BufferUsages, ComputePipeline, ShaderStages};
 
 use crate::{
     application::graphics::Graphics,
     core::{
+        binding::BindGroupBuilder,
         buffer::{Buffer, BufferType, StorageParameters, UniformParameters},
         render::{ComputeHandle, RenderContext},
     },
@@ -21,6 +22,7 @@ pub struct Compute {
     pub input_buffers: Vec<Buffer>,
     pub output_buffer: Buffer,
     pub render_buffer: Buffer,
+    pub bind_groups: Vec<Option<wgpu::BindGroup>>,
 
     pub temp_buffer: Option<wgpu::Buffer>,
     pub length: u32,
@@ -134,11 +136,17 @@ impl Compute {
         data: Vec<u8>,
         readback_state: ReadbackState,
     ) -> Compute {
-        let mut bind_group_layouts: Vec<Option<&BindGroupLayout>> = Vec::new();
-        for buffer in input_buffers.iter() {
-            bind_group_layouts.push(Some(&buffer.bind_group_layout));
+        let mut bindings = BindGroupBuilder::new();
+        for (group, buffer) in input_buffers.iter().enumerate() {
+            bindings.buffer(buffer, group as u32, 0);
         }
-        bind_group_layouts.push(Some(&output_buffer.bind_group_layout));
+        bindings.buffer(&output_buffer, input_buffers.len() as u32, 0);
+        let built_bindings = bindings.build(&render_context.device, "compute bind group");
+        let bind_group_layouts = built_bindings
+            .layouts
+            .iter()
+            .map(Option::as_ref)
+            .collect::<Vec<_>>();
 
         let render_buffer = Buffer::from_existing(
             &output_buffer,
@@ -193,6 +201,7 @@ impl Compute {
             length: length as u32,
             data,
             render_buffer,
+            bind_groups: built_bindings.bind_groups,
         }
     }
     pub fn read_result(&mut self, data: Result<wgpu::BufferView, wgpu::MapRangeError>) {

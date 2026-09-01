@@ -1,3 +1,4 @@
+pub(crate) mod binding;
 pub mod buffer;
 pub mod engine;
 pub mod entities;

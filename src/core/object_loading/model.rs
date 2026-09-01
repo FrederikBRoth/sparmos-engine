@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 
-use wgpu::Device;
-
 use crate::{
     application::graphics::Graphics,
     core::{
-        object_loading::{self, obj::load_obj},
+        object_loading::{self},
         render::{InstanceControllerHandle, MaterialHandle, MeshHandle, TextureHandle},
     },
 };
@@ -35,7 +33,7 @@ impl Model {
         )
     }
 
-    pub fn load_gltf(
+    pub fn load_glb(
         gfx: &mut Graphics,
         data: &[u8],
         instance_handle: InstanceControllerHandle,

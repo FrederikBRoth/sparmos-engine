@@ -2,11 +2,11 @@ use std::{cell::RefCell, mem, rc::Rc, sync::Arc, time::Duration};
 
 use cgmath::Vector3;
 use hecs::{DynamicBundle, Entity, Query, QueryBorrow};
-use indexmap::IndexMap;
 use wgpu::{Device, Queue};
 
 use crate::{
     core::{
+        binding::BindGroupBuilder,
         buffer::Buffer,
         engine::{
             Engine,
@@ -86,12 +86,10 @@ impl Graphics {
     pub fn material<V: Vertex, I: RawInstance>(&mut self) -> MaterialBuilder<'_> {
         MaterialBuilder {
             graphics: self,
-            buffers: IndexMap::new(),
-            textures: vec![],
+            bindings: BindGroupBuilder::new(),
             shader: String::new(),
             vertex_layout: V::layout(),
             instance_layout: I::layout(),
-            compute_render_buffer: None,
             config: PipelineConfig::default(),
         }
     }
@@ -157,8 +155,8 @@ impl Graphics {
     }
 
     #[allow(unused)]
-    pub(crate) fn get_bind_group_layouts(&self) -> Vec<Option<&wgpu::BindGroupLayout>> {
-        self.engine.systems.get_bind_group_layouts()
+    pub(crate) fn get_buffers(&self) -> Vec<&Buffer> {
+        self.engine.systems.get_buffers()
     }
 
     pub fn entity_query_first<B: Query>(&self, f: impl for<'a> FnOnce(<B as Query>::Item<'a>)) {
@@ -238,7 +236,7 @@ impl Graphics {
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 target_format: None,
             })
-            .texture(skybox_texture)
+            .texture(&skybox_texture, 1, 0)
             .build();
 
         let skybox_renderable = SkyboxRenderable {
@@ -246,6 +244,43 @@ impl Graphics {
             mesh_handle: skybox_mesh,
         };
         self.add_entity((skybox_renderable,));
+    }
+
+    pub(crate) fn material_with_texture(
+        &mut self,
+        base: MaterialHandle,
+        texture: &Texture,
+        group: u32,
+        start_binding: u32,
+    ) -> MaterialHandle {
+        let material = self.engine.render_context.gpu_objects.materials[base].with_texture(
+            self.get_device(),
+            texture,
+            group,
+            start_binding,
+        );
+        let key = material.key.clone();
+        if let Some(handle) = self
+            .engine
+            .render_context
+            .gpu_objects
+            .material_lookup
+            .get(&key)
+        {
+            return *handle;
+        }
+        let handle = self
+            .engine
+            .render_context
+            .gpu_objects
+            .materials
+            .insert(material);
+        self.engine
+            .render_context
+            .gpu_objects
+            .material_lookup
+            .insert(key, handle);
+        handle
     }
 }
 
