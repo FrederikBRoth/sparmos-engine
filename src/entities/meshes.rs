@@ -89,7 +89,7 @@ impl Meshes {
 
     pub fn create_textured(&self) -> Textured {
         match self {
-            Meshes::Cube => todo!(),
+            Meshes::Cube => new_textured_cube(),
             Meshes::Sphere => create_sphere(1.0, 64, 32),
         }
     }
@@ -194,6 +194,120 @@ pub fn new_cube() -> Primitive {
     );
 
     Primitive { vertices, indices }
+}
+pub fn new_textured_cube() -> Textured {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    let mut i = 0u32;
+
+    let mut push_face = |positions: [[f32; 3]; 6], uvs: [[f32; 2]; 6], normal: [f32; 3]| {
+        for (pos, uv) in positions.iter().zip(uvs.iter()) {
+            vertices.push(TexturedVertex {
+                position: *pos,
+                tex_coords: *uv,
+                normal,
+            });
+
+            indices.push(i);
+            i += 1;
+        }
+    };
+
+    let face_uvs = [
+        [0.0, 1.0],
+        [1.0, 1.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 0.0],
+        [0.0, 0.0],
+    ];
+
+    // Front (Z+)
+    push_face(
+        [
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
+        ],
+        face_uvs,
+        [0.0, 0.0, 1.0],
+    );
+
+    // Back (Z-)
+    push_face(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+        ],
+        face_uvs,
+        [0.0, 0.0, -1.0],
+    );
+
+    // Right (X+)
+    push_face(
+        [
+            [1.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0],
+        ],
+        face_uvs,
+        [1.0, 0.0, 0.0],
+    );
+
+    // Left (X-)
+    push_face(
+        [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ],
+        face_uvs,
+        [-1.0, 0.0, 0.0],
+    );
+
+    // Top (Y+)
+    push_face(
+        [
+            [0.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        face_uvs,
+        [0.0, 1.0, 0.0],
+    );
+
+    // Bottom (Y-)
+    push_face(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+        ],
+        face_uvs,
+        [0.0, -1.0, 0.0],
+    );
+
+    Textured { vertices, indices }
 }
 use std::f32::consts::PI;
 
