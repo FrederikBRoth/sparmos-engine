@@ -1,4 +1,22 @@
+use std::time::Instant;
+
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
+use hecs::Entity;
+
+use crate::{
+    application::graphics::Graphics,
+    core::{
+        entities::World,
+        render::{MaterialHandle, Renderable},
+    },
+};
+
+#[derive(Clone, Copy, Debug)]
+pub struct Collision {
+    pub entity_handle: Entity,
+    pub instance_index: usize,
+    pub distance: f32,
+}
 
 #[derive(Clone, Debug)]
 pub enum Collider {
@@ -7,12 +25,33 @@ pub enum Collider {
     Capsule { radius: f32, half_height: f32 },
 }
 
+impl Collider {
+    pub(crate) fn aabb(&self, position: Vector3<f32>) -> Aabb {
+        match self {
+            Collider::Box { half_extents } => Aabb::from_box(position, half_extents.clone()),
+            Collider::Sphere { radius } => Aabb::from_sphere(position, radius.clone()),
+            Collider::Capsule {
+                radius,
+                half_height,
+            } => Aabb::from_capsule(position, radius.clone(), half_height.clone()),
+        }
+    }
+}
+
 pub struct Aabb {
     pub min: Vector3<f32>,
     pub max: Vector3<f32>,
 }
 
 impl Aabb {
+    pub fn from_capsule(position: Vector3<f32>, radius: f32, half_height: f32) -> Self {
+        let extents = Vector3::new(radius, half_height + radius, radius);
+
+        Self {
+            min: position - extents,
+            max: position + extents,
+        }
+    }
     pub fn from_sphere(position: Vector3<f32>, radius: f32) -> Self {
         let r = Vector3::new(radius, radius, radius);
 
@@ -43,6 +82,114 @@ impl Aabb {
 pub struct Ray {
     pub origin: Point3<f32>,
     pub direction: Vector3<f32>,
+}
+
+impl Ray {
+    //Only uses AABB collision for checks. Will not be completely precise for more complex colliders
+    pub fn broad_intersects<'a>(&self, world: &World, gfx: &mut Graphics) -> Option<Collision> {
+        let mut closest: Option<Collision> = None;
+
+        world.query::<(Entity, (&Renderable, &Collider))>(|mut query| {
+            for (entity, (r, c)) in query.iter() {
+                let ic = gfx
+                    .engine
+                    .get_instance_controller(&r.instance_controller_handle);
+                for (i, instance) in ic.instances().iter().enumerate() {
+                    if !instance.should_render {
+                        continue;
+                    }
+                    let aabb = c.aabb(instance.position);
+                    if let Some(distance) = ray_aabb(self, &aabb) {
+                        if closest
+                            .map(|collision| distance < collision.distance)
+                            .unwrap_or(true)
+                        {
+                            closest = Some(Collision {
+                                entity_handle: entity,
+                                instance_index: i,
+                                distance,
+                            });
+                        }
+                    }
+                }
+            }
+        });
+
+        closest
+    }
+
+    pub fn precise_intersects<'a>(&self, world: &World, gfx: &mut Graphics) -> Option<Collision> {
+        let now = Instant::now();
+        let mut broad_hits: Vec<Collision> = vec![];
+
+        world.query::<(Entity, (&Renderable, &Collider))>(|mut query| {
+            for (entity, (r, c)) in query.iter() {
+                let ic = gfx
+                    .engine
+                    .get_instance_controller(&r.instance_controller_handle);
+                for (i, instance) in ic.instances().iter().enumerate() {
+                    if !instance.should_render {
+                        continue;
+                    }
+
+                    let aabb = c.aabb(instance.position);
+                    if let Some(distance) = ray_aabb(self, &aabb) {
+                        broad_hits.push(Collision {
+                            entity_handle: entity,
+                            instance_index: i,
+                            distance,
+                        });
+                    }
+                }
+            }
+        });
+
+        broad_hits.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+
+        let mut closest: Option<Collision> = None;
+        for entity in broad_hits {
+            let mut query = world
+                .entities
+                .query_one::<(&Renderable, &Collider)>(entity.entity_handle);
+
+            let Ok((renderable, collider)) = query.get() else {
+                continue;
+            };
+
+            let instance = gfx
+                .engine
+                .get_instance_controller(&renderable.instance_controller_handle)
+                .instances()[entity.instance_index]
+                .clone();
+
+            if let Some(distance) = match collider {
+                Collider::Box { half_extents } => ray_aabb(self, &collider.aabb(instance.position)),
+                Collider::Sphere { radius } => {
+                    ray_sphere(self, Point3::from_vec(instance.position), *radius)
+                }
+                Collider::Capsule {
+                    radius,
+                    half_height,
+                } => todo!(),
+            } {
+                if closest
+                    .map(|collision| distance < collision.distance)
+                    .unwrap_or(true)
+                {
+                    closest = Some(Collision {
+                        entity_handle: entity.entity_handle,
+                        instance_index: entity.instance_index,
+                        distance,
+                    });
+                }
+            }
+
+            // precise test
+        }
+        let elapsed = now.elapsed().as_micros();
+        println!("Raytrace: Finish {:?}", elapsed);
+        closest
+    }
 }
 
 pub fn ray_aabb(ray: &Ray, aabb: &Aabb) -> Option<f32> {
@@ -137,4 +284,3 @@ pub fn ray_triangle(
 
     if t > epsilon { Some(t) } else { None }
 }
-
