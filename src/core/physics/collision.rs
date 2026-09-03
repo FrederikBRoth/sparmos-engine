@@ -5,10 +5,7 @@ use hecs::Entity;
 
 use crate::{
     application::graphics::Graphics,
-    core::{
-        entities::World,
-        render::{MaterialHandle, Renderable},
-    },
+    core::{entities::World, render::Renderable},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -20,20 +17,49 @@ pub struct Collision {
 
 #[derive(Clone, Debug)]
 pub enum Collider {
-    Box { half_extents: Vector3<f32> },
-    Sphere { radius: f32 },
-    Capsule { radius: f32, half_height: f32 },
+    /// Full local extents from the voxel's minimum corner at the origin.
+    Box {
+        extents: Vector3<f32>,
+    },
+    Sphere {
+        radius: f32,
+    },
+    Capsule {
+        radius: f32,
+        half_height: f32,
+    },
 }
 
 impl Collider {
-    pub(crate) fn aabb(&self, position: Vector3<f32>) -> Aabb {
+    /// Bounds for axis-aligned instances with uniform scale.
+    pub(crate) fn aabb(&self, position: Vector3<f32>, scale: f32) -> Aabb {
+        let magnitude = scale.abs();
         match self {
-            Collider::Box { half_extents } => Aabb::from_box(position, half_extents.clone()),
-            Collider::Sphere { radius } => Aabb::from_sphere(position, radius.clone()),
+            Collider::Box { extents } => {
+                let world_extents = *extents * magnitude;
+                // Mirroring a corner-relative mesh moves its minimum corner.
+                let min = if scale < 0.0 {
+                    position - world_extents
+                } else {
+                    position
+                };
+                Aabb::from_box(min, world_extents)
+            }
+            Collider::Sphere { radius } => Aabb::from_sphere(position, *radius * magnitude),
             Collider::Capsule {
                 radius,
                 half_height,
-            } => Aabb::from_capsule(position, radius.clone(), half_height.clone()),
+            } => Aabb::from_capsule(position, *radius * magnitude, *half_height * magnitude),
+        }
+    }
+
+    fn precise_intersection(&self, ray: &Ray, position: Vector3<f32>, scale: f32) -> Option<f32> {
+        match self {
+            Collider::Box { .. } => ray_aabb(ray, &self.aabb(position, scale)),
+            Collider::Sphere { radius } => {
+                ray_sphere(ray, Point3::from_vec(position), *radius * scale.abs())
+            }
+            Collider::Capsule { .. } => todo!(),
         }
     }
 }
@@ -61,11 +87,11 @@ impl Aabb {
         }
     }
 
-    //position is the cornor, not middle
-    pub fn from_box(center: Vector3<f32>, extents: Vector3<f32>) -> Self {
+    /// Build a box from its minimum corner and full extents.
+    pub fn from_box(position: Vector3<f32>, extents: Vector3<f32>) -> Self {
         Self {
-            min: center,
-            max: center + extents,
+            min: position,
+            max: position + extents,
         }
     }
 
@@ -98,7 +124,7 @@ impl Ray {
                     if !instance.should_render {
                         continue;
                     }
-                    let aabb = c.aabb(instance.position);
+                    let aabb = c.aabb(instance.position, instance.scale);
                     if let Some(distance) = ray_aabb(self, &aabb) {
                         if closest
                             .map(|collision| distance < collision.distance)
@@ -132,7 +158,7 @@ impl Ray {
                         continue;
                     }
 
-                    let aabb = c.aabb(instance.position);
+                    let aabb = c.aabb(instance.position, instance.scale);
                     if let Some(distance) = ray_aabb(self, &aabb) {
                         broad_hits.push(Collision {
                             entity_handle: entity,
@@ -162,16 +188,9 @@ impl Ray {
                 .instances()[entity.instance_index]
                 .clone();
 
-            if let Some(distance) = match collider {
-                Collider::Box { half_extents } => ray_aabb(self, &collider.aabb(instance.position)),
-                Collider::Sphere { radius } => {
-                    ray_sphere(self, Point3::from_vec(instance.position), *radius)
-                }
-                Collider::Capsule {
-                    radius,
-                    half_height,
-                } => todo!(),
-            } {
+            if let Some(distance) =
+                collider.precise_intersection(self, instance.position, instance.scale)
+            {
                 if closest
                     .map(|collision| distance < collision.distance)
                     .unwrap_or(true)
@@ -183,8 +202,6 @@ impl Ray {
                     });
                 }
             }
-
-            // precise test
         }
         let elapsed = now.elapsed().as_micros();
         println!("Raytrace: Finish {:?}", elapsed);

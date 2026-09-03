@@ -335,7 +335,7 @@ pub enum InstanceTemplate {
 }
 
 impl InstanceTemplate {
-    pub fn get_instances(&self, origin: Vector3<f32>, _size: f32) -> Vec<Instance> {
+    pub fn get_instances(&self, origin: Vector3<f32>, scale: f32) -> Vec<Instance> {
         let positions: Vec<Vector3<f32>> = match self {
             InstanceTemplate::GridX(size) => {
                 let y = size.x as u32;
@@ -449,7 +449,7 @@ impl InstanceTemplate {
                     index: index as u32,
                     position,
                     rotation,
-                    scale: 1.0,
+                    scale,
                     should_render: true,
                     color,
                     size,

@@ -4,6 +4,9 @@ use indexmap::IndexMap;
 use wgpu::{BindGroup, Device, Queue, RenderPipeline, TextureFormat, TextureView};
 use winit::dpi::PhysicalSize;
 
+/// Render target enlargement used by the centered post-process crop.
+pub const POST_PROCESS_OVERSCAN: f32 = 1.1;
+
 #[derive(Hash, Eq, PartialEq, Clone, Copy)]
 pub enum Effect {
     None,
@@ -24,6 +27,22 @@ pub struct PostProcessHandler {
 }
 
 impl PostProcessHandler {
+    pub fn overscan_size(screen_size: PhysicalSize<u32>) -> PhysicalSize<u32> {
+        PhysicalSize::new(
+            (screen_size.width as f32 * POST_PROCESS_OVERSCAN) as u32,
+            (screen_size.height as f32 * POST_PROCESS_OVERSCAN) as u32,
+        )
+    }
+
+    /// Map final display NDC back through the active centered crops.
+    pub fn display_to_render_ndc_scale(&self) -> f32 {
+        // Every currently implemented pass uses the same crop shader. An empty
+        // chain renders directly to the surface and leaves NDC unchanged.
+        self.post_processes
+            .values()
+            .fold(1.0, |scale, _| scale / POST_PROCESS_OVERSCAN)
+    }
+
     pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Self {
         Self {
             device,
@@ -31,17 +50,19 @@ impl PostProcessHandler {
             post_processes: IndexMap::new(),
         }
     }
+    /// Create an effect from the normal window size; overscan is applied internally.
     pub fn new_effect(
         &mut self,
         screen_size: PhysicalSize<u32>,
         format: TextureFormat,
         effect: Effect,
     ) {
+        let render_size = Self::overscan_size(screen_size);
         let render_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("PostProcess Texture"),
             size: wgpu::Extent3d {
-                width: (screen_size.width as f32 * 1.1) as u32,
-                height: (screen_size.height as f32 * 1.1) as u32,
+                width: render_size.width,
+                height: render_size.height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -139,7 +160,10 @@ impl PostProcessHandler {
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &[("post_process_overscan", POST_PROCESS_OVERSCAN as f64)],
+                        ..Default::default()
+                    },
                 }),
 
                 primitive: wgpu::PrimitiveState {
@@ -172,13 +196,15 @@ impl PostProcessHandler {
         self.post_processes.insert(effect, pp);
     }
 
+    /// Resize from the normal window size, using the same overscan as creation.
     pub fn resize(&mut self, screen_size: PhysicalSize<u32>) {
+        let render_size = Self::overscan_size(screen_size);
         for post_process in self.post_processes.values_mut() {
             let render_texture = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("PostProcess Texture"),
                 size: wgpu::Extent3d {
-                    width: screen_size.width,
-                    height: screen_size.height,
+                    width: render_size.width,
+                    height: render_size.height,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,

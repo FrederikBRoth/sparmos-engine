@@ -1,3 +1,6 @@
+// Supplied from POST_PROCESS_OVERSCAN when the pipeline is created.
+override post_process_overscan: f32;
+
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -33,9 +36,10 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 // Flip Y
     let screen_uv = vec2(in.uv.x, 1.0 - in.uv.y);
 
-    let offset_uv = (1.0 - 0.909) * 0.5;
+    let crop_scale = 1.0 / post_process_overscan;
+    let offset_uv = (1.0 - crop_scale) * 0.5;
 
-    let uv = screen_uv * 0.909 + offset_uv;
+    let uv = screen_uv * crop_scale + offset_uv;
 
     // --- Chromatic aberration ---
     let center = vec2<f32>(0.5, 0.5);

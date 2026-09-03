@@ -11,7 +11,7 @@ use crate::{
         engine::{
             Engine,
             EngineCommandQueue::{self, AddEntity},
-            System,
+            GpuBindableSystem, System,
         },
         entities::World,
         geometry::{ModelBuilder, Skybox, Vertex},
@@ -135,7 +135,7 @@ impl Graphics {
         ComputeRenderingBuilder::new(self, compute)
     }
 
-    pub fn add_system<T: System + 'static>(&mut self, system: T) {
+    pub fn add_system(&mut self, system: System) {
         self.engine.systems.add(system);
     }
 

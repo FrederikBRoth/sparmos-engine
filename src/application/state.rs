@@ -189,10 +189,7 @@ impl State {
         };
         let post_processing = PostProcessHandler::new(Arc::clone(&device), Arc::clone(&queue));
 
-        let overscan_size = PhysicalSize::new(
-            (size.width as f32 * 1.1) as u32,
-            (size.height as f32 * 1.1) as u32,
-        );
+        let overscan_size = PostProcessHandler::overscan_size(size);
         let render_context = RenderContext {
             depth_texture: Texture::create_depth_texture(&device, &size, "depth_texture_primitive"),
             overscan_depth_texture: Texture::create_depth_texture(
@@ -298,10 +295,7 @@ impl State {
             // if let Some(game_loop) = self.game_loop.as_mut() {
             //     game_loop.resize(&self.render_context.config);
             // }
-            let overscan_size = PhysicalSize::new(
-                (new_size.width as f32 * 1.1) as u32,
-                (new_size.height as f32 * 1.1) as u32,
-            );
+            let overscan_size = PostProcessHandler::overscan_size(new_size);
 
             self.graphics.get_render_context_mut().depth_texture = Texture::create_depth_texture(
                 self.graphics.get_device(),
@@ -320,7 +314,7 @@ impl State {
                 .engine
                 .render_context
                 .post_processing
-                .resize(overscan_size);
+                .resize(new_size);
         } else {
             println!("Not configured");
             log::warn!("Not Configured");

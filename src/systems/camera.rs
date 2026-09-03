@@ -14,7 +14,7 @@ use crate::{
     application::graphics::Graphics,
     core::{
         buffer::{Buffer, BufferType, UniformParameters},
-        engine::System,
+        engine::GpuBindableSystem,
         entities::World,
         render::RenderContext,
     },
@@ -201,19 +201,36 @@ impl Camera {
     fn build_projection_matrix(&self) -> cgmath::Matrix4<f32> {
         cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar)
     }
+    /// Construct a picking ray using the post-processing display-to-render scale.
+    /// Pass 1.0 when rendering directly to the display.
     pub fn screen_to_world_ray(
         &self,
         mouse_x: f32,
         mouse_y: f32,
         screen_width: f32,
         screen_height: f32,
+        display_to_render_ndc_scale: f32,
     ) -> (Point3<f32>, Vector3<f32>) {
         // Convert screen coords to normalized device coordinates (NDC)
         let front = self
-            .project_screen_to_world(mouse_x, mouse_y, 1.0, screen_width, screen_height)
+            .project_screen_to_world(
+                mouse_x,
+                mouse_y,
+                1.0,
+                screen_width,
+                screen_height,
+                display_to_render_ndc_scale,
+            )
             .unwrap();
         let back = self
-            .project_screen_to_world(mouse_x, mouse_y, 0.0, screen_width, screen_height)
+            .project_screen_to_world(
+                mouse_x,
+                mouse_y,
+                0.0,
+                screen_width,
+                screen_height,
+                display_to_render_ndc_scale,
+            )
             .unwrap();
 
         let test = (Point3::from_vec(back), -(front - back).normalize());
@@ -228,15 +245,15 @@ impl Camera {
         mouse_z: f32,
         screen_width: f32,
         screen_height: f32,
+        display_to_render_ndc_scale: f32,
     ) -> Option<Vector3<f32>> {
         let view_projection = OPENGL_TO_WGPU_MATRIX * self.build_view_projection_matrix();
         if let Some(inv_view_projection) = view_projection.invert() {
+            let raw_ndc_x = mouse_x / screen_width * 2.0 - 1.0;
+            let raw_ndc_y = (1.0 - mouse_y / screen_height) * 2.0 - 1.0;
             let world = Vector4::new(
-                (mouse_x) / (screen_width) * 2.0 - 1.0,
-                // Screen Origin is Top Left    (Mouse Origin is Top Left)
-                //          (screen.y - (viewport.y as f32)) / (viewport.w as f32) * 2.0 - 1.0,
-                // Screen Origin is Bottom Left (Mouse Origin is Top Left)
-                (1.0 - (mouse_y) / screen_height) * 2.0 - 1.0,
+                raw_ndc_x * display_to_render_ndc_scale,
+                raw_ndc_y * display_to_render_ndc_scale,
                 mouse_z * 2.0 - 1.0,
                 1.0,
             );
@@ -541,7 +558,7 @@ pub fn normalize_and_map_camera_height(x: i64, a: i64, b: i64, start: f32, end: 
     start + (end * 2.0) * normalized
 }
 
-impl System for CameraSystem {
+impl GpuBindableSystem for CameraSystem {
     fn run(&mut self, world: Ref<'_, World>, rc: &mut RenderContext, dt: std::time::Duration) {
         world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
             camera.update_camera(dt);
@@ -563,4 +580,54 @@ impl System for CameraSystem {
     //     resources.buffers.insert(self.camera_buffer.clone());
     //     resources.resource_map.insert(type_id, Box::new(self));
     // }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::post_processing::POST_PROCESS_OVERSCAN;
+
+    #[test]
+    fn picking_rays_project_back_to_display_with_and_without_crop_after_resize() {
+        let mut camera = Camera::new(PhysicalSize::new(800.0, 600.0), 1.0, 1.0);
+        camera.eye = Point3::new(0.0, 0.0, 0.0);
+        camera.target = Point3::new(0.0, 0.0, -1.0);
+        camera.camera_mode = CameraMode::AnimatedMode;
+
+        for (width, height) in [(800.0, 600.0), (1600.0, 900.0), (901.0, 677.0)] {
+            camera.aspect = width / height;
+            let view_projection = OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix();
+            for crop_scale in [1.0, 1.0 / POST_PROCESS_OVERSCAN] {
+                for x in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    for y in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                        let (origin, direction) = camera.screen_to_world_ray(
+                            x * width,
+                            y * height,
+                            width,
+                            height,
+                            crop_scale,
+                        );
+                        assert!(direction.dot(camera.target - camera.eye) > 0.0);
+                        let point_on_ray = origin + direction * 20.0;
+                        let clip = view_projection * point_on_ray.to_homogeneous();
+                        let render_ndc = clip.truncate() / clip.w;
+                        // Inverse of the centered crop in the final display shader.
+                        let display_x = (render_ndc.x / crop_scale + 1.0) * 0.5;
+                        let display_y = (1.0 - render_ndc.y / crop_scale) * 0.5;
+                        assert!((display_x - x).abs() < 1e-5, "x={x}, got {display_x}");
+                        assert!((display_y - y).abs() < 1e-5, "y={y}, got {display_y}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn centered_crop_leaves_the_center_ray_unchanged() {
+        let camera = Camera::new(PhysicalSize::new(800.0, 600.0), 1.0, 1.0);
+        let original = camera.screen_to_world_ray(400.0, 300.0, 800.0, 600.0, 1.0);
+        let cropped =
+            camera.screen_to_world_ray(400.0, 300.0, 800.0, 600.0, 1.0 / POST_PROCESS_OVERSCAN);
+        assert_eq!(original, cropped);
+    }
 }

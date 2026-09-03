@@ -2,7 +2,7 @@ use cgmath::Vector3;
 
 use crate::core::{
     buffer::{Buffer, BufferType, UniformParameters},
-    engine::System,
+    engine::GpuBindableSystem,
 };
 
 const MAX_LIGHTS: usize = 16;
@@ -72,7 +72,7 @@ impl LightSystem {
     }
 }
 
-impl System for LightSystem {
+impl GpuBindableSystem for LightSystem {
     #[allow(unused)]
     fn run(
         &mut self,
