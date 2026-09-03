@@ -21,15 +21,49 @@ use crate::{
         resource::Resources,
     },
 };
-pub trait System {
+
+pub enum System {
+    GpuBindable(Box<dyn GpuBindableSystem>),
+    Default(Box<dyn DefaultSystem>),
+}
+
+impl System {
+    pub fn gpu_bindable<T>(system: T) -> Self
+    where
+        T: GpuBindableSystem + 'static,
+    {
+        Self::GpuBindable(Box::new(system))
+    }
+
+    pub fn default<T>(system: T) -> Self
+    where
+        T: DefaultSystem + 'static,
+    {
+        Self::Default(Box::new(system))
+    }
+    fn run(&mut self, world: Ref<'_, World>, resources: &mut RenderContext, dt: Duration) {
+        match self {
+            System::GpuBindable(gpu_bindable_system) => {
+                gpu_bindable_system.run(world, resources, dt)
+            }
+            System::Default(default_system) => default_system.run(world, resources, dt),
+        }
+    }
+}
+
+pub trait DefaultSystem {
+    fn run(&mut self, world: Ref<'_, World>, resources: &mut RenderContext, dt: Duration);
+}
+
+pub trait GpuBindableSystem {
     fn run(&mut self, world: Ref<'_, World>, resources: &mut RenderContext, dt: Duration);
     fn get_buffer(&self) -> &Buffer;
     fn binding_location(&self) -> (u32, u32);
 }
 
 impl Systems {
-    pub fn add<T: System + 'static>(&mut self, system: T) {
-        self.systems.push(Box::new(system));
+    pub fn add(&mut self, system: System) {
+        self.systems.push(system);
     }
 
     pub fn run_all(
@@ -46,23 +80,29 @@ impl Systems {
     pub(crate) fn get_buffers(&self) -> Vec<&Buffer> {
         self.systems
             .iter()
-            .map(|resource| resource.get_buffer())
+            .filter_map(|resource| match resource {
+                System::GpuBindable(gpu_bindable) => Some(gpu_bindable.get_buffer()),
+                _ => None,
+            })
             .collect()
     }
 
     pub(crate) fn get_bindings(&self) -> Vec<(u32, u32, &Buffer)> {
         self.systems
             .iter()
-            .map(|system| {
-                let (group, binding) = system.binding_location();
-                (group, binding, system.get_buffer())
+            .filter_map(|resource| match resource {
+                System::GpuBindable(gpu_bindable) => {
+                    let (group, binding) = gpu_bindable.binding_location();
+                    Some((group, binding, gpu_bindable.get_buffer()))
+                }
+                _ => None,
             })
             .collect()
     }
 }
 
 pub struct Systems {
-    pub(crate) systems: Vec<Box<dyn System>>,
+    pub(crate) systems: Vec<System>,
 }
 
 pub struct EngineTime {
