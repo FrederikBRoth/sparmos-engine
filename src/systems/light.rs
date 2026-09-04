@@ -3,6 +3,7 @@ use cgmath::Vector3;
 use crate::core::{
     buffer::{Buffer, BufferType, UniformParameters},
     engine::GpuBindableSystem,
+    entities::World,
 };
 
 const MAX_LIGHTS: usize = 16;
@@ -76,7 +77,7 @@ impl GpuBindableSystem for LightSystem {
     #[allow(unused)]
     fn run(
         &mut self,
-        world: std::cell::Ref<'_, crate::core::entities::World>,
+        world: &mut World,
         resources: &mut crate::core::render::RenderContext,
         dt: std::time::Duration,
     ) {

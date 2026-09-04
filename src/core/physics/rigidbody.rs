@@ -23,4 +23,19 @@ impl RigidBody {
             mass,
         }
     }
+
+    pub fn inv_mass(&self) -> f32 {
+        match self.body_type {
+            BodyType::Static => 0.0,
+            BodyType::Dynamic => {
+                if self.mass > 0.0 {
+                    1.0 / self.mass
+                } else {
+                    0.0
+                }
+            }
+            //temp
+            BodyType::Kinematic => 0.0,
+        }
+    }
 }

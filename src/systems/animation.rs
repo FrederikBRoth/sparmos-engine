@@ -288,7 +288,7 @@ impl AnimationHandler {
                 instances
                     .iter()
                     .map(|instance| Animation {
-                        base_position: instance.position,
+                        base_position: instance.transform.position,
                         offset: vec3(0.0, 0.0, 0.0),
                         persistents: persistents.clone(),
                         steps: steps.clone(),
@@ -390,8 +390,7 @@ impl AnimationHandler {
         for (anim, instance) in self.movement_list.iter_mut().zip(instances.iter_mut()) {
             let final_pos = anim.final_position();
 
-            instance.position = final_pos;
-            instance.bounding = instance.size + final_pos;
+            instance.transform.position = final_pos;
             instance.color = anim.color;
 
             anim.base_position = final_pos;
@@ -406,8 +405,7 @@ impl AnimationHandler {
         for (anim, instance) in self.movement_list.iter_mut().zip(instances.iter_mut()) {
             anim.update(dt);
 
-            instance.position = anim.final_position();
-            instance.bounding = instance.size + instance.position;
+            instance.transform.position = anim.final_position();
             instance.color = anim.color;
         }
     }

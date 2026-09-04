@@ -1,20 +1,92 @@
 use std::time::Instant;
 
-use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Point3, Rotation, Vector3};
 use hecs::Entity;
 
 use crate::{
     application::graphics::Graphics,
-    core::{entities::World, render::Renderable},
+    core::{entities::World, instance::Transform, render::Renderable},
 };
 
 #[derive(Clone, Copy, Debug)]
-pub struct Collision {
+pub struct RayHit {
     pub entity_handle: Entity,
     pub instance_index: usize,
     pub distance: f32,
 }
 
+pub struct Collision {
+    pub object_a: (Entity, usize),
+    pub object_b: (Entity, usize),
+    pub collision_points: CollisionPoints,
+}
+
+//Or manifold
+pub struct CollisionPoints {
+    pub a: Vector3<f32>,
+    pub b: Vector3<f32>,
+    pub normal: Vector3<f32>,
+    pub depth: f32,
+    pub has_collision: bool,
+}
+
+impl Default for CollisionPoints {
+    fn default() -> Self {
+        Self {
+            a: [0.0, 0.0, 0.0].into(),
+            b: [0.0, 0.0, 0.0].into(),
+            normal: [0.0, 0.0, 0.0].into(),
+            depth: Default::default(),
+            has_collision: Default::default(),
+        }
+    }
+}
+
+impl CollisionPoints {
+    pub fn new(a: Vector3<f32>, b: Vector3<f32>) -> Self {
+        let ba = a - b;
+        let depth = ba.magnitude();
+
+        let normal = if depth > 0.00001 {
+            ba / depth
+        } else {
+            Vector3::unit_y()
+        };
+
+        Self {
+            a,
+            b,
+            normal,
+            depth,
+            has_collision: true,
+        }
+    }
+
+    pub fn new_with_normal_distance(
+        a: Vector3<f32>,
+        b: Vector3<f32>,
+        normal: Vector3<f32>,
+        depth: f32,
+    ) -> Self {
+        Self {
+            a,
+            b,
+            normal,
+            depth,
+            has_collision: true,
+        }
+    }
+}
+
+type CollisionFn =
+    fn(a: &Collider, at: &Transform, b: &Collider, bt: &Transform) -> Result<CollisionPoints, ()>;
+
+#[rustfmt::skip]
+const COLLISION_TABLE: [[Option<CollisionFn>; 2]; 2] = [
+    //Sphere                  Plane
+    [Some(sphere_sphere_collision), Some(sphere_plane_collision)],
+    [None, None],
+];
 #[derive(Clone, Debug)]
 pub enum Collider {
     /// Full local extents from the voxel's minimum corner at the origin.
@@ -28,39 +100,153 @@ pub enum Collider {
         radius: f32,
         half_height: f32,
     },
+    Plane,
 }
 
 impl Collider {
     /// Bounds for axis-aligned instances with uniform scale.
-    pub(crate) fn aabb(&self, position: Vector3<f32>, scale: f32) -> Aabb {
-        let magnitude = scale.abs();
+    pub(crate) fn aabb(&self, transform: &Transform) -> Aabb {
+        let magnitude = transform.scale.abs();
         match self {
             Collider::Box { extents } => {
                 let world_extents = *extents * magnitude;
                 // Mirroring a corner-relative mesh moves its minimum corner.
-                let min = if scale < 0.0 {
-                    position - world_extents
+                let min = if transform.scale < 0.0 {
+                    transform.position - world_extents
                 } else {
-                    position
+                    transform.position
                 };
                 Aabb::from_box(min, world_extents)
             }
-            Collider::Sphere { radius } => Aabb::from_sphere(position, *radius * magnitude),
+            Collider::Sphere { radius } => {
+                Aabb::from_sphere(transform.position, *radius * magnitude)
+            }
             Collider::Capsule {
                 radius,
                 half_height,
-            } => Aabb::from_capsule(position, *radius * magnitude, *half_height * magnitude),
+            } => Aabb::from_capsule(
+                transform.position,
+                *radius * magnitude,
+                *half_height * magnitude,
+            ),
+            Collider::Plane => Aabb::from_plane(transform.position, transform.scale),
         }
     }
 
-    fn precise_intersection(&self, ray: &Ray, position: Vector3<f32>, scale: f32) -> Option<f32> {
+    fn precise_ray_intersection(&self, ray: &Ray, transform: &Transform) -> Option<f32> {
         match self {
-            Collider::Box { .. } => ray_aabb(ray, &self.aabb(position, scale)),
-            Collider::Sphere { radius } => {
-                ray_sphere(ray, Point3::from_vec(position), *radius * scale.abs())
-            }
+            Collider::Box { .. } => ray_aabb(ray, &self.aabb(transform)),
+            Collider::Sphere { radius } => ray_sphere(
+                ray,
+                Point3::from_vec(transform.position),
+                *radius * transform.scale.abs(),
+            ),
             Collider::Capsule { .. } => todo!(),
+            Collider::Plane => ray_plane(ray, transform),
         }
+    }
+
+    pub fn index(&self) -> usize {
+        match self {
+            Collider::Sphere { .. } => 0,
+            Collider::Plane => 1,
+
+            Collider::Capsule { .. } => 2,
+            Collider::Box { .. } => 3,
+        }
+    }
+
+    pub(crate) fn collision(
+        a: &Collider,
+        at: &Transform,
+        b: &Collider,
+        bt: &Transform,
+    ) -> CollisionPoints {
+        let do_swap = a.index() > b.index();
+
+        let (a, at, b, bt) = if do_swap {
+            (b, bt, a, at)
+        } else {
+            (a, at, b, bt)
+        };
+
+        let mut collision_points =
+            COLLISION_TABLE[a.index()][b.index()].unwrap()(a, at, b, bt).unwrap();
+
+        if do_swap {
+            std::mem::swap(&mut collision_points.a, &mut collision_points.b);
+            collision_points.normal = -collision_points.normal;
+        }
+
+        collision_points
+    }
+}
+
+fn sphere_sphere_collision(
+    a: &Collider,
+    at: &Transform,
+    b: &Collider,
+    bt: &Transform,
+) -> Result<CollisionPoints, ()> {
+    if let Collider::Sphere { radius: radius_a } = a
+        && let Collider::Sphere { radius: radius_b } = b
+    {
+        let ab = bt.position - at.position;
+
+        let a_radius = radius_a * at.scale;
+        let b_radius = radius_b * bt.scale;
+
+        let distance = ab.magnitude();
+
+        if (distance < 0.00001 || distance > a_radius + b_radius) {
+            return Ok(CollisionPoints::default());
+        }
+
+        let normal = ab.normalize();
+
+        let a_deep = at.position + normal * a_radius;
+        let b_deep = bt.position - normal * b_radius;
+
+        Ok(CollisionPoints::new(a_deep, b_deep))
+    } else {
+        println!("Collider A is not a sphere and/or collider B is not a sphere");
+        Err(())
+    }
+}
+
+fn sphere_plane_collision(
+    a: &Collider,
+    at: &Transform,
+    b: &Collider,
+    bt: &Transform,
+) -> Result<CollisionPoints, ()> {
+    if let Collider::Sphere { radius: radius_a } = a
+        && let Collider::Plane = b
+    {
+        let a_radius = radius_a * at.scale;
+
+        let plane_normal = bt.rotation.rotate_vector(Vector3::unit_y()).normalize();
+
+        let point_on_plane = bt.position;
+
+        let distance = (at.position - point_on_plane).dot(plane_normal);
+
+        if distance > a_radius {
+            return Ok(CollisionPoints::default());
+        }
+
+        let a_deep = at.position + plane_normal * a_radius;
+        let b_deep = bt.position - plane_normal * distance;
+
+        Ok(CollisionPoints::new_with_normal_distance(
+            a_deep,
+            b_deep,
+            plane_normal,
+            distance,
+        ))
+    } else {
+        println!("Collider A is not a sphere and/or collider B is not a sphere");
+        Err(())
     }
 }
 
@@ -95,6 +281,16 @@ impl Aabb {
         }
     }
 
+    pub fn from_plane(position: Vector3<f32>, size: f32) -> Aabb {
+        let half = size * 0.5;
+        let thickness = 0.001;
+
+        Self {
+            min: cgmath::Vector3::new(position.x - half, position.y - thickness, position.z - half),
+            max: cgmath::Vector3::new(position.x + half, position.y + thickness, position.z + half),
+        }
+    }
+
     pub fn intersects_aabb(a: &Aabb, b: &Aabb) -> bool {
         a.min.x <= b.max.x
             && a.max.x >= b.min.x
@@ -112,8 +308,8 @@ pub struct Ray {
 
 impl Ray {
     //Only uses AABB collision for checks. Will not be completely precise for more complex colliders
-    pub fn broad_intersects<'a>(&self, world: &World, gfx: &mut Graphics) -> Option<Collision> {
-        let mut closest: Option<Collision> = None;
+    pub fn broad_intersects<'a>(&self, world: &World, gfx: &mut Graphics) -> Option<RayHit> {
+        let mut closest: Option<RayHit> = None;
 
         world.query::<(Entity, (&Renderable, &Collider))>(|mut query| {
             for (entity, (r, c)) in query.iter() {
@@ -124,13 +320,13 @@ impl Ray {
                     if !instance.should_render {
                         continue;
                     }
-                    let aabb = c.aabb(instance.position, instance.scale);
+                    let aabb = c.aabb(&instance.transform);
                     if let Some(distance) = ray_aabb(self, &aabb) {
                         if closest
                             .map(|collision| distance < collision.distance)
                             .unwrap_or(true)
                         {
-                            closest = Some(Collision {
+                            closest = Some(RayHit {
                                 entity_handle: entity,
                                 instance_index: i,
                                 distance,
@@ -144,9 +340,9 @@ impl Ray {
         closest
     }
 
-    pub fn precise_intersects<'a>(&self, world: &World, gfx: &mut Graphics) -> Option<Collision> {
+    pub fn precise_intersects<'a>(&self, world: &World, gfx: &mut Graphics) -> Option<RayHit> {
         let now = Instant::now();
-        let mut broad_hits: Vec<Collision> = vec![];
+        let mut broad_hits: Vec<RayHit> = vec![];
 
         world.query::<(Entity, (&Renderable, &Collider))>(|mut query| {
             for (entity, (r, c)) in query.iter() {
@@ -158,9 +354,9 @@ impl Ray {
                         continue;
                     }
 
-                    let aabb = c.aabb(instance.position, instance.scale);
+                    let aabb = c.aabb(&instance.transform);
                     if let Some(distance) = ray_aabb(self, &aabb) {
-                        broad_hits.push(Collision {
+                        broad_hits.push(RayHit {
                             entity_handle: entity,
                             instance_index: i,
                             distance,
@@ -172,7 +368,7 @@ impl Ray {
 
         broad_hits.sort_by(|a, b| a.distance.total_cmp(&b.distance));
 
-        let mut closest: Option<Collision> = None;
+        let mut closest: Option<RayHit> = None;
         for entity in broad_hits {
             let mut query = world
                 .entities
@@ -188,14 +384,12 @@ impl Ray {
                 .instances()[entity.instance_index]
                 .clone();
 
-            if let Some(distance) =
-                collider.precise_intersection(self, instance.position, instance.scale)
-            {
+            if let Some(distance) = collider.precise_ray_intersection(self, &instance.transform) {
                 if closest
                     .map(|collision| distance < collision.distance)
                     .unwrap_or(true)
                 {
-                    closest = Some(Collision {
+                    closest = Some(RayHit {
                         entity_handle: entity.entity_handle,
                         instance_index: entity.instance_index,
                         distance,
@@ -300,4 +494,13 @@ pub fn ray_triangle(
     let t = f * edge2.dot(q);
 
     if t > epsilon { Some(t) } else { None }
+}
+
+fn ray_plane(ray: &Ray, transform: &Transform) -> Option<f32> {
+    let plane_normal = transform
+        .rotation
+        .rotate_vector(Vector3::unit_y())
+        .normalize();
+    println!("{:?}", plane_normal);
+    None
 }

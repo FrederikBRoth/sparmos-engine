@@ -22,21 +22,6 @@ impl World {
             f(item);
         }
     }
-
-    // pub fn query_first_with_resources<B: Query>(
-    //     &mut self,
-    //     f: impl for<'a> FnOnce(&mut Resources, <B as Query>::Item<'a>),
-    // ) where
-    //     B: Query,
-    // {
-    //     let world = &mut self.entities;
-    //
-    //     let mut query = world.query::<B>();
-    //
-    //     if let Some(item) = query.iter().next() {
-    //         f(&mut self.resources, item);
-    //     }
-    // }
     pub fn query<B: Query>(&self, f: impl for<'a> FnOnce(QueryBorrow<'a, B>)) {
         let entities = &self.entities;
 
@@ -44,16 +29,4 @@ impl World {
 
         f(query);
     }
-    // pub fn query_with_resources<B: Query>(
-    //     &mut self,
-    //     f: impl for<'a> FnOnce(&mut Resources, QueryBorrow<'a, B>),
-    // ) where
-    //     B: Query,
-    // {
-    //     let world = &mut self.entities;
-    //
-    //     let query = world.query::<B>();
-    //
-    //     f(&mut self.resources, query);
-    // }
 }

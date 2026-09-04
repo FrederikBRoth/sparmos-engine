@@ -74,6 +74,7 @@ use crate::core::geometry::{
 pub enum Meshes {
     Cube,
     Sphere,
+    Plane,
 }
 
 impl Meshes {
@@ -84,6 +85,7 @@ impl Meshes {
         match self {
             Meshes::Cube => new_cube(),
             Meshes::Sphere => todo!(),
+            Meshes::Plane => todo!(),
         }
     }
 
@@ -91,8 +93,64 @@ impl Meshes {
         match self {
             Meshes::Cube => new_textured_cube(),
             Meshes::Sphere => create_sphere(1.0, 64, 32),
+            Meshes::Plane => create_plane(),
         }
     }
+}
+
+pub fn create_plane() -> Textured {
+    let vertices = vec![
+        // Top
+        TexturedVertex {
+            position: [-0.5, 0.0, -0.5],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [0.0, 0.0],
+        },
+        TexturedVertex {
+            position: [0.5, 0.0, -0.5],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [1.0, 0.0],
+        },
+        TexturedVertex {
+            position: [-0.5, 0.0, 0.5],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [0.0, 1.0],
+        },
+        TexturedVertex {
+            position: [0.5, 0.0, 0.5],
+            normal: [0.0, 1.0, 0.0],
+            tex_coords: [1.0, 1.0],
+        },
+        // Bottom
+        TexturedVertex {
+            position: [-0.5, 0.0, -0.5],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [0.0, 0.0],
+        },
+        TexturedVertex {
+            position: [0.5, 0.0, -0.5],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [1.0, 0.0],
+        },
+        TexturedVertex {
+            position: [-0.5, 0.0, 0.5],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [0.0, 1.0],
+        },
+        TexturedVertex {
+            position: [0.5, 0.0, 0.5],
+            normal: [0.0, -1.0, 0.0],
+            tex_coords: [1.0, 1.0],
+        },
+    ];
+
+    let indices = vec![
+        // +Y
+        0, 2, 1, 1, 2, 3, // -Y
+        4, 5, 6, 5, 7, 6,
+    ];
+
+    Textured { vertices, indices }
 }
 pub fn new_cube() -> Primitive {
     let face_color = [1.0, 0.0, 1.0];

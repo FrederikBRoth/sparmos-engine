@@ -41,7 +41,7 @@ impl System {
     {
         Self::Default(Box::new(system))
     }
-    fn run(&mut self, world: Ref<'_, World>, resources: &mut RenderContext, dt: Duration) {
+    fn run(&mut self, world: &mut World, resources: &mut RenderContext, dt: Duration) {
         match self {
             System::GpuBindable(gpu_bindable_system) => {
                 gpu_bindable_system.run(world, resources, dt)
@@ -52,11 +52,11 @@ impl System {
 }
 
 pub trait DefaultSystem {
-    fn run(&mut self, world: Ref<'_, World>, resources: &mut RenderContext, dt: Duration);
+    fn run(&mut self, world: &mut World, resources: &mut RenderContext, dt: Duration);
 }
 
 pub trait GpuBindableSystem {
-    fn run(&mut self, world: Ref<'_, World>, resources: &mut RenderContext, dt: Duration);
+    fn run(&mut self, world: &mut World, resources: &mut RenderContext, dt: Duration);
     fn get_buffer(&self) -> &Buffer;
     fn binding_location(&self) -> (u32, u32);
 }
@@ -73,7 +73,7 @@ impl Systems {
         dt: Duration,
     ) {
         for system in &mut self.systems {
-            system.run(world.borrow(), resources, dt);
+            system.run(&mut world.borrow_mut(), resources, dt);
         }
     }
 

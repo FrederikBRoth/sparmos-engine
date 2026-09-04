@@ -559,7 +559,7 @@ pub fn normalize_and_map_camera_height(x: i64, a: i64, b: i64, start: f32, end: 
 }
 
 impl GpuBindableSystem for CameraSystem {
-    fn run(&mut self, world: Ref<'_, World>, rc: &mut RenderContext, dt: std::time::Duration) {
+    fn run(&mut self, world: &mut World, rc: &mut RenderContext, dt: std::time::Duration) {
         world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
             camera.update_camera(dt);
             self.update_camera(camera, rc);

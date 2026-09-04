@@ -1,11 +1,32 @@
 use std::marker::PhantomData;
 
-use cgmath::{InnerSpace, Rotation3, Vector2, Vector3, Zero};
+use cgmath::{InnerSpace, Quaternion, Rotation3, Vector2, Vector3, Zero};
 
 use crate::{
     application::graphics::Graphics,
     core::{geometry::VertexBufferLayoutOwned, render::InstanceControllerHandle},
 };
+
+#[derive(Clone)]
+pub struct Transform {
+    pub position: Vector3<f32>,
+    pub rotation: Quaternion<f32>,
+    //simple scale at this point
+    pub scale: f32,
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            position: cgmath::Vector3::new(0.0, 0.0, 0.0),
+            rotation: cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_z(),
+                cgmath::Deg(0.0),
+            ), // Identity rotation,
+            scale: 20.0,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct InstanceController<T>
@@ -137,29 +158,20 @@ where
 #[derive(Clone)]
 pub struct Instance {
     pub index: u32,
-    pub position: cgmath::Vector3<f32>,
-    pub rotation: cgmath::Quaternion<f32>,
+    pub transform: Transform,
     pub should_render: bool,
-    pub scale: f32,
     pub color: cgmath::Vector3<f32>,
     pub size: cgmath::Vector3<f32>,
-    pub bounding: cgmath::Vector3<f32>,
 }
 
 impl Default for Instance {
     fn default() -> Self {
         Self {
             index: 0,
-            position: cgmath::Vector3::new(0.0, 0.0, 0.0),
-            rotation: cgmath::Quaternion::from_axis_angle(
-                cgmath::Vector3::unit_z(),
-                cgmath::Deg(0.0),
-            ), // Identity rotation
+            transform: Default::default(),
             should_render: true,
-            scale: 20.0,
             color: cgmath::Vector3::new(1.0, 1.0, 1.0), // white
             size: cgmath::Vector3::new(1.0, 1.0, 1.0),
-            bounding: cgmath::Vector3::new(1.0, 1.0, 1.0),
         }
     }
 }
@@ -167,8 +179,11 @@ impl Default for Instance {
 impl Instance {
     pub fn new(position: cgmath::Vector3<f32>, scale: f32) -> Self {
         Self {
-            position,
-            scale,
+            transform: Transform {
+                position,
+                scale,
+                ..Default::default()
+            },
             ..Default::default()
         }
     }
@@ -221,9 +236,9 @@ impl RawInstance for DefaultInstanceLayout {
 
     fn to_raw(instance: &Instance) -> Self {
         DefaultInstanceLayout {
-            position: instance.position.into(),
-            scale: instance.scale,
-            rotation: instance.rotation.into(), // must be quaternion
+            position: instance.transform.position.into(),
+            scale: instance.transform.scale,
+            rotation: instance.transform.rotation.into(), // must be quaternion
             color: instance.color.into(),
             _pad: 0.0,
         }
@@ -298,8 +313,8 @@ impl RawInstance for InstanceRaw {
     }
 
     fn to_raw(instance: &Instance) -> Self {
-        let s = instance.scale;
-        let rotation: [[f32; 3]; 3] = cgmath::Matrix3::from(instance.rotation).into();
+        let s = instance.transform.scale;
+        let rotation: [[f32; 3]; 3] = cgmath::Matrix3::from(instance.transform.rotation).into();
 
         // Compute R * S (scale each column of rotation)
         let mut model = [[0.0; 4]; 4];
@@ -310,14 +325,14 @@ impl RawInstance for InstanceRaw {
         }
 
         // Now apply translation (T * R * S)
-        model[3][0] = instance.position.x;
-        model[3][1] = instance.position.y;
-        model[3][2] = instance.position.z;
+        model[3][0] = instance.transform.position.x;
+        model[3][1] = instance.transform.position.y;
+        model[3][2] = instance.transform.position.z;
         model[3][3] = 1.0;
         InstanceRaw {
             model,
             color: instance.color.into(),
-            normal: cgmath::Matrix3::from(instance.rotation).into(),
+            normal: cgmath::Matrix3::from(instance.transform.rotation).into(),
         }
     }
 }
@@ -447,13 +462,14 @@ impl InstanceTemplate {
 
                 Instance {
                     index: index as u32,
-                    position,
-                    rotation,
-                    scale,
+                    transform: Transform {
+                        position,
+                        rotation,
+                        scale,
+                    },
                     should_render: true,
                     color,
                     size,
-                    bounding: position + size,
                 }
             })
             .collect()
