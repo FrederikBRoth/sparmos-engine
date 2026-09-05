@@ -1,6 +1,6 @@
 use std::{cell::RefCell, mem, rc::Rc, sync::Arc, time::Duration};
 
-use cgmath::Vector3;
+use cgmath::{InnerSpace, Quaternion, Rotation3, Vector2, Vector3, Zero};
 use hecs::{DynamicBundle, Entity, Query, QueryBorrow};
 use wgpu::{Device, Queue};
 
@@ -109,6 +109,7 @@ impl Graphics {
             template: None,
             phantom_data: Default::default(),
             instances: vec![],
+            rotation: Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0)),
         }
     }
 

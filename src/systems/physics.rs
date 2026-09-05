@@ -1,13 +1,12 @@
 use cgmath::{Vector3, vec3};
 use hecs::Entity;
-use wgpu::wgt::instance;
 
 use crate::core::{
-    engine::{DefaultSystem, GpuBindableSystem},
+    engine::DefaultSystem,
     entities::World,
     physics::{
         collision::{Collider, Collision},
-        rigidbody::{self, BodyType, RigidBody},
+        rigidbody::{BodyType, RigidBody},
         solver::{ImpulseSolver, PositionSolver, Solver},
     },
     render::Renderable,
@@ -25,7 +24,7 @@ impl PhysicsSystem {
         Self {
             current_dt: 0.0,
             gravity,
-            solvers: vec![Box::new(PositionSolver), Box::new(ImpulseSolver)],
+            solvers: vec![Box::new(ImpulseSolver), Box::new(PositionSolver)],
         }
     }
 }
@@ -40,72 +39,88 @@ impl DefaultSystem for PhysicsSystem {
         self.current_dt += dt.as_secs_f32();
 
         while self.current_dt >= PHYSICS_DT {
-            let mut collisions: Vec<Collision> = vec![];
+            world.query::<(&Renderable, &mut RigidBody)>(|mut query| {
+                for (renderable, rigidbody) in query.iter() {
+                    let instances = resources.gpu_objects.instance_controllers
+                        [renderable.instance_controller_handle]
+                        .instances_mut();
+                    debug_assert_eq!(
+                        instances.len(),
+                        1,
+                        "physics entities currently require exactly one instance"
+                    );
+
+                    if matches!(rigidbody.body_type, BodyType::Dynamic) {
+                        let acceleration = self.gravity + rigidbody.force * rigidbody.inv_mass();
+                        rigidbody.velocity += acceleration * PHYSICS_DT;
+
+                        if let Some(instance) = instances.first_mut() {
+                            instance.transform.position += rigidbody.velocity * PHYSICS_DT;
+                        }
+                    }
+
+                    rigidbody.force = vec3(0.0, 0.0, 0.0);
+                }
+            });
+
+            let mut candidates = vec![];
             world.query::<(Entity, &Renderable, &Collider, &RigidBody)>(|mut query| {
-                for (entity_a, renderable_a, collider_a, rigidbody_a) in query.iter() {
-                    for (i_a, instance_a) in resources.gpu_objects.instance_controllers
-                        [renderable_a.instance_controller_handle]
-                        .instances()
-                        .iter()
-                        .enumerate()
-                    {
-                        world.query::<(Entity, &Renderable, &Collider, &RigidBody)>(|mut query| {
-                            for (entity_b, renderable_b, collider_b, rigidbody_b) in query.iter() {
-                                for (i_b, instance_b) in resources.gpu_objects.instance_controllers
-                                    [renderable_b.instance_controller_handle]
-                                    .instances()
-                                    .iter()
-                                    .enumerate()
-                                {
-                                    if entity_a == entity_b {
-                                        continue;
-                                    }
+                for (entity, renderable, collider, rigidbody) in query.iter() {
+                    let instances = resources.gpu_objects.instance_controllers
+                        [renderable.instance_controller_handle]
+                        .instances();
+                    debug_assert_eq!(
+                        instances.len(),
+                        1,
+                        "physics entities currently require exactly one instance"
+                    );
 
-                                    let points = Collider::collision(
-                                        collider_a,
-                                        &instance_a.transform,
-                                        collider_b,
-                                        &instance_b.transform,
-                                    );
-
-                                    if (points.has_collision) {
-                                        collisions.push(Collision {
-                                            object_a: (entity_a, i_a),
-                                            object_b: (entity_b, i_b),
-                                            collision_points: points,
-                                        });
-                                        println!("COLLISION!!!!")
-                                    }
-                                }
-                            }
+                    if let Some(instance) = instances.first() {
+                        candidates.push(PhysicsCandidate {
+                            entity,
+                            collider: collider.clone(),
+                            transform: instance.transform.clone(),
+                            is_static: matches!(rigidbody.body_type, BodyType::Static),
                         });
                     }
                 }
             });
 
-            for solver in self.solvers.iter() {
-                solver.solve(world, &collisions, dt.as_secs_f32(), resources);
+            let mut collisions: Vec<Collision> = vec![];
+            for (i, j) in unordered_pair_indices(candidates.len()) {
+                let a = &candidates[i];
+                let b = &candidates[j];
+                if a.is_static && b.is_static {
+                    continue;
+                }
+
+                let points =
+                    Collider::collision(&a.collider, &a.transform, &b.collider, &b.transform);
+                if points.has_collision {
+                    collisions.push(Collision {
+                        object_a: (a.entity, 0),
+                        object_b: (b.entity, 0),
+                        collision_points: points,
+                    });
+                }
             }
 
-            world.query::<(Entity, &Renderable, &Collider, &mut RigidBody)>(|mut query| {
-                for (_, renderable, collider, rigidbody) in query.iter() {
-                    if matches!(rigidbody.body_type, BodyType::Static) {
-                        continue;
-                    }
-                    for instance in resources.gpu_objects.instance_controllers
-                        [renderable.instance_controller_handle]
-                        .instances_mut()
-                    {
-                        rigidbody.force += rigidbody.mass * self.gravity;
-                        rigidbody.velocity += rigidbody.force / rigidbody.mass * PHYSICS_DT;
-
-                        instance.transform.position += rigidbody.velocity * PHYSICS_DT;
-                        rigidbody.force = vec3(0.0, 0.0, 0.0);
-                    }
-                }
-            });
+            for solver in self.solvers.iter() {
+                solver.solve(world, &collisions, PHYSICS_DT, resources);
+            }
 
             self.current_dt -= PHYSICS_DT
         }
     }
+}
+
+struct PhysicsCandidate {
+    entity: Entity,
+    collider: Collider,
+    transform: crate::core::instance::Transform,
+    is_static: bool,
+}
+
+fn unordered_pair_indices(len: usize) -> impl Iterator<Item = (usize, usize)> {
+    (0..len).flat_map(move |i| ((i + 1)..len).map(move |j| (i, j)))
 }

@@ -350,7 +350,12 @@ pub enum InstanceTemplate {
 }
 
 impl InstanceTemplate {
-    pub fn get_instances(&self, origin: Vector3<f32>, scale: f32) -> Vec<Instance> {
+    pub fn get_instances(
+        &self,
+        origin: Vector3<f32>,
+        scale: f32,
+        rotation: Quaternion<f32>,
+    ) -> Vec<Instance> {
         let positions: Vec<Vector3<f32>> = match self {
             InstanceTemplate::GridX(size) => {
                 let y = size.x as u32;
@@ -449,12 +454,13 @@ impl InstanceTemplate {
                 let local_position = position - origin;
 
                 let rotation = if local_position.is_zero() {
-                    cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+                    rotation
                 } else {
-                    cgmath::Quaternion::from_axis_angle(
+                    let initial = cgmath::Quaternion::from_axis_angle(
                         local_position.normalize(),
                         cgmath::Deg(0.0),
-                    )
+                    );
+                    initial * rotation
                 };
 
                 let color = Vector3::new(1.0, 1.0, 1.0);
@@ -483,6 +489,7 @@ pub struct InstanceBuilder<'a, T: RawInstance> {
     pub(crate) phantom_data: PhantomData<T>,
     pub(crate) instances: Vec<Instance>,
     pub(crate) global_size: f32,
+    pub(crate) rotation: Quaternion<f32>,
 }
 
 impl<'a, T: RawInstance> InstanceBuilder<'a, T> {
@@ -504,14 +511,19 @@ impl<'a, T: RawInstance> InstanceBuilder<'a, T> {
         self
     }
 
+    pub fn rotation(mut self, rotation: Quaternion<f32>) -> Self {
+        self.rotation = rotation;
+        self
+    }
+
     pub fn build(self) -> InstanceControllerHandle {
         let instances = if let Some(template) = self.template {
-            template.get_instances(self.origin, self.global_size)
+            template.get_instances(self.origin, self.global_size, self.rotation)
         } else {
             if !self.instances.is_empty() {
                 self.instances
             } else {
-                InstanceTemplate::Single.get_instances(self.origin, self.global_size)
+                InstanceTemplate::Single.get_instances(self.origin, self.global_size, self.rotation)
             }
         };
         let mut raw = Vec::with_capacity(instances.len());

@@ -1,4 +1,4 @@
-use std::time::Instant;
+use web_time::Instant;
 
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Rotation, Vector3};
 use hecs::Entity;
@@ -21,7 +21,11 @@ pub struct Collision {
     pub collision_points: CollisionPoints,
 }
 
-//Or manifold
+/// A world-space contact manifold for objects A and B.
+///
+/// For a valid contact, `a` lies on A, `b` lies on B, `normal` is normalized
+/// and points from A toward B, and `depth` is the non-negative penetration.
+#[derive(Clone, Copy, Debug)]
 pub struct CollisionPoints {
     pub a: Vector3<f32>,
     pub b: Vector3<f32>,
@@ -53,21 +57,18 @@ impl CollisionPoints {
             Vector3::unit_y()
         };
 
-        Self {
-            a,
-            b,
-            normal,
-            depth,
-            has_collision: true,
-        }
+        Self::new_with_normal_and_depth(a, b, normal, depth)
     }
 
-    pub fn new_with_normal_distance(
+    pub fn new_with_normal_and_depth(
         a: Vector3<f32>,
         b: Vector3<f32>,
         normal: Vector3<f32>,
         depth: f32,
     ) -> Self {
+        debug_assert!(depth >= 0.0);
+        debug_assert!((normal.magnitude2() - 1.0).abs() < 0.0001);
+
         Self {
             a,
             b,
@@ -170,8 +171,17 @@ impl Collider {
             (a, at, b, bt)
         };
 
-        let mut collision_points =
-            COLLISION_TABLE[a.index()][b.index()].unwrap()(a, at, b, bt).unwrap();
+        let Some(collision_fn) = COLLISION_TABLE
+            .get(a.index())
+            .and_then(|row| row.get(b.index()))
+            .and_then(|collision_fn| *collision_fn)
+        else {
+            return CollisionPoints::default();
+        };
+
+        let Ok(mut collision_points) = collision_fn(a, at, b, bt) else {
+            return CollisionPoints::default();
+        };
 
         if do_swap {
             std::mem::swap(&mut collision_points.a, &mut collision_points.b);
@@ -193,21 +203,24 @@ fn sphere_sphere_collision(
     {
         let ab = bt.position - at.position;
 
-        let a_radius = radius_a * at.scale;
-        let b_radius = radius_b * bt.scale;
+        let a_radius = (radius_a * at.scale).abs();
+        let b_radius = (radius_b * bt.scale).abs();
 
         let distance = ab.magnitude();
 
-        if (distance < 0.00001 || distance > a_radius + b_radius) {
+        if distance < 0.00001 || distance > a_radius + b_radius {
             return Ok(CollisionPoints::default());
         }
 
         let normal = ab.normalize();
 
-        let a_deep = at.position + normal * a_radius;
-        let b_deep = bt.position - normal * b_radius;
+        let point_a = at.position + normal * a_radius;
+        let point_b = bt.position - normal * b_radius;
+        let depth = a_radius + b_radius - distance;
 
-        Ok(CollisionPoints::new(a_deep, b_deep))
+        Ok(CollisionPoints::new_with_normal_and_depth(
+            point_a, point_b, normal, depth,
+        ))
     } else {
         println!("Collider A is not a sphere and/or collider B is not a sphere");
         Err(())
@@ -223,26 +236,26 @@ fn sphere_plane_collision(
     if let Collider::Sphere { radius: radius_a } = a
         && let Collider::Plane = b
     {
-        let a_radius = radius_a * at.scale;
+        let a_radius = (radius_a * at.scale).abs();
 
         let plane_normal = bt.rotation.rotate_vector(Vector3::unit_y()).normalize();
 
-        let point_on_plane = bt.position;
+        let signed_distance = (at.position - bt.position).dot(plane_normal);
 
-        let distance = (at.position - point_on_plane).dot(plane_normal);
-
-        if distance > a_radius {
+        if signed_distance > a_radius {
             return Ok(CollisionPoints::default());
         }
 
-        let a_deep = at.position + plane_normal * a_radius;
-        let b_deep = bt.position - plane_normal * distance;
+        let point_a = at.position - plane_normal * a_radius;
+        let point_b = at.position - plane_normal * signed_distance;
+        let contact_normal = -plane_normal;
+        let penetration_depth = a_radius - signed_distance;
 
-        Ok(CollisionPoints::new_with_normal_distance(
-            a_deep,
-            b_deep,
-            plane_normal,
-            distance,
+        Ok(CollisionPoints::new_with_normal_and_depth(
+            point_a,
+            point_b,
+            contact_normal,
+            penetration_depth,
         ))
     } else {
         println!("Collider A is not a sphere and/or collider B is not a sphere");

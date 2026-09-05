@@ -1,5 +1,6 @@
 use cgmath::Vector3;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BodyType {
     Static,
     Dynamic,
