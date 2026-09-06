@@ -9,7 +9,7 @@ use crate::{
     },
 };
 
-pub trait Vertex {
+pub trait VertexType {
     fn layout() -> VertexBufferLayoutOwned;
 }
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
@@ -68,27 +68,10 @@ pub struct SkyboxVertex {
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct PrimitiveVertex {
-    pub position: [f32; 3],
-    pub color: [f32; 3],
-    pub normal: [f32; 3],
-    pub quad_id: u32,
-}
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct TexturedVertex {
+pub struct DefaultVertex {
     pub position: [f32; 3],
     pub tex_coords: [f32; 2],
     pub normal: [f32; 3],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct PbrVertex {
-    pub position: [f32; 3],
-    pub tex_coords: [f32; 2],
-    pub normal: [f32; 3],
-    pub tangent: [f32; 4],
 }
 
 #[derive(Debug)]
@@ -96,7 +79,7 @@ pub struct Skybox {
     pub vertices: Vec<SkyboxVertex>,
     pub indices: Vec<u32>,
 }
-impl Vertex for Skybox {
+impl VertexType for Skybox {
     fn layout() -> VertexBufferLayoutOwned {
         VertexBufferLayoutOwned {
             array_stride: mem::size_of::<SkyboxVertex>() as wgpu::BufferAddress,
@@ -122,67 +105,18 @@ impl Skybox {
         rc.gpu_objects.meshes.insert(mesh)
     }
 }
-#[derive(Debug)]
-pub struct Primitive {
-    pub vertices: Vec<PrimitiveVertex>,
-    pub indices: Vec<u32>,
-}
-
-impl Vertex for Primitive {
-    fn layout() -> VertexBufferLayoutOwned {
-        VertexBufferLayoutOwned {
-            array_stride: mem::size_of::<PrimitiveVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: vec![
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
-                    shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 9]>() as wgpu::BufferAddress,
-                    shader_location: 3,
-                    format: wgpu::VertexFormat::Uint32,
-                },
-            ],
-        }
-    }
-}
-impl Primitive {
-    pub fn make_mb(&self, rc: &mut RenderContext) -> MeshHandle {
-        let mesh = Mesh::new(
-            &rc.device,
-            &self.vertices,
-            &self.indices,
-            self.vertices.len() as u32,
-            self.indices.len() as u32,
-        );
-
-        rc.gpu_objects.meshes.insert(mesh)
-    }
-}
 
 #[derive(Debug)]
-pub struct Textured {
+pub struct Vertex {
     // pub num_indices: u32,
-    pub vertices: Vec<TexturedVertex>,
+    pub vertices: Vec<DefaultVertex>,
     pub indices: Vec<u32>,
 }
 
-impl Vertex for Textured {
+impl VertexType for Vertex {
     fn layout() -> VertexBufferLayoutOwned {
         VertexBufferLayoutOwned {
-            array_stride: mem::size_of::<TexturedVertex>() as wgpu::BufferAddress,
+            array_stride: mem::size_of::<DefaultVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: vec![
                 wgpu::VertexAttribute {
@@ -204,7 +138,7 @@ impl Vertex for Textured {
         }
     }
 }
-impl Textured {
+impl Vertex {
     pub fn make_mb(&self, rc: &mut RenderContext) -> MeshHandle {
         let mesh = Mesh::new(
             &rc.device,
@@ -274,8 +208,7 @@ pub struct ModelBuilder<'a> {
     pub(crate) gfx: &'a mut Graphics,
     pub(crate) data: &'a [u8],
     pub(crate) mtl_data: Option<&'a [u8]>,
-    pub(crate) texture_material: Option<MaterialHandle>,
-    pub(crate) primitive_material: Option<MaterialHandle>,
+    pub(crate) material: Option<MaterialHandle>,
     pub(crate) instance: Option<InstanceControllerHandle>,
 }
 
@@ -285,8 +218,7 @@ impl<'a> ModelBuilder<'a> {
             gfx,
             data: &[],
             mtl_data: None,
-            texture_material: None,
-            primitive_material: None,
+            material: None,
             instance: None,
         }
     }
@@ -301,12 +233,8 @@ impl<'a> ModelBuilder<'a> {
         self
     }
 
-    pub fn texture_pipeline(mut self, handle: MaterialHandle) -> Self {
-        self.texture_material = Some(handle);
-        self
-    }
-    pub fn primitive_pipeline(mut self, handle: MaterialHandle) -> Self {
-        self.primitive_material = Some(handle);
+    pub fn pipeline(mut self, handle: MaterialHandle) -> Self {
+        self.material = Some(handle);
         self
     }
 
@@ -320,16 +248,9 @@ impl<'a> ModelBuilder<'a> {
             self.data,
             self.mtl_data,
             self.gfx,
-            self.texture_material,
-            self.primitive_material,
+            self.material.unwrap(),
             self.instance,
         );
         model.unwrap()
     }
-}
-
-#[derive(Debug)]
-pub enum VertexType {
-    Textured(Textured),
-    Primitive(Primitive),
 }

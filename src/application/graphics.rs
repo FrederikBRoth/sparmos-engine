@@ -14,7 +14,7 @@ use crate::{
             System,
         },
         entities::World,
-        geometry::{ModelBuilder, Skybox, Vertex},
+        geometry::{ModelBuilder, Skybox, Vertex, VertexType},
         instance::{
             DefaultInstanceLayout, InstanceBuilder, InstanceControllerTrait, RawInstance, Transform,
         },
@@ -187,6 +187,8 @@ impl Graphics {
             entities
         }
     }
+    ///Physics entities are added with defined hecs objects due to how we handle transform data
+    ///We have to adjust the transform data
     pub fn add_physics_entity(
         &mut self,
         material: MaterialHandle,
@@ -280,8 +282,19 @@ impl Graphics {
         &self.engine.render_context
     }
 
-    /// Returns the material of this [`Graphics`].
-    pub fn material<V: Vertex, I: RawInstance>(&mut self) -> MaterialBuilder<'_> {
+    pub fn material(&mut self) -> MaterialBuilder<'_> {
+        self.material_typed::<Vertex, DefaultInstanceLayout>()
+    }
+
+    pub fn material_vertex<V: VertexType>(&mut self) -> MaterialBuilder<'_> {
+        self.material_typed::<V, DefaultInstanceLayout>()
+    }
+
+    pub fn material_instance<I: RawInstance>(&mut self) -> MaterialBuilder<'_> {
+        self.material_typed::<Vertex, I>()
+    }
+
+    pub fn material_typed<V: VertexType, I: RawInstance>(&mut self) -> MaterialBuilder<'_> {
         MaterialBuilder {
             graphics: self,
             bindings: BindGroupBuilder::new(),
@@ -427,7 +440,7 @@ impl Graphics {
     pub fn add_skybox(&mut self, skybox_texture: Texture) {
         let skybox_mesh = Meshes::create_skybox().make_mb(self.get_render_context_mut());
         let skybox_pipeline = self
-            .material::<Skybox, DefaultInstanceLayout>()
+            .material_typed::<Skybox, DefaultInstanceLayout>()
             .shader("skybox")
             .config(PipelineConfig {
                 culling: None,

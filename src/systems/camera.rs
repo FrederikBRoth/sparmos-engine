@@ -18,9 +18,16 @@ use crate::{
         entities::World,
         render::RenderContext,
     },
-    helpers::line_trace::OPENGL_TO_WGPU_MATRIX,
     systems::animation::{AnimationHandler, AnimationType},
 };
+
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.5,
+    0.0, 0.0, 0.0, 1.0,
+);
 
 pub struct CameraAnimator {
     pub disabled: bool,

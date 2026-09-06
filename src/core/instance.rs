@@ -23,7 +23,7 @@ impl Default for Transform {
                 cgmath::Vector3::unit_z(),
                 cgmath::Deg(0.0),
             ), // Identity rotation,
-            scale: 20.0,
+            scale: 1.0,
         }
     }
 }

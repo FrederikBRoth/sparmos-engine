@@ -19,18 +19,10 @@ impl Model {
         obj_data: &[u8],
         mtl_data: Option<&[u8]>,
         gfx: &mut Graphics,
-        textured_material_handle: Option<MaterialHandle>,
-        primitive_material_handle: Option<MaterialHandle>,
+        material_handle: MaterialHandle,
         instance_handle: Option<InstanceControllerHandle>,
     ) -> Option<Self> {
-        object_loading::obj::load_obj(
-            obj_data,
-            mtl_data,
-            gfx,
-            textured_material_handle,
-            primitive_material_handle,
-            instance_handle,
-        )
+        object_loading::obj::load_obj(obj_data, mtl_data, gfx, material_handle, instance_handle)
     }
 
     pub fn load_glb(

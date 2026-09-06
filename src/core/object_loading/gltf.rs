@@ -6,7 +6,7 @@ use image::{DynamicImage, RgbaImage};
 use crate::{
     application::graphics::Graphics,
     core::{
-        geometry::{Mesh, TexturedVertex},
+        geometry::{DefaultVertex, Mesh, Vertex},
         object_loading::model::Model,
         render::{InstanceControllerHandle, MaterialHandle, TextureHandle},
         texture::Texture,
@@ -62,11 +62,11 @@ fn load_meshes<'a>(
                 .unwrap()
                 .into_u32()
                 .collect::<Vec<u32>>();
-            let vertices: Vec<TexturedVertex> = positions
+            let vertices: Vec<DefaultVertex> = positions
                 .into_iter()
                 .zip(normals)
                 .zip(tex_coords)
-                .map(|((position, normal), tex_coord)| TexturedVertex {
+                .map(|((position, normal), tex_coord)| DefaultVertex {
                     position,
                     tex_coords: tex_coord,
                     normal,

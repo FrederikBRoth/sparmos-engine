@@ -9,7 +9,7 @@ use crate::{
     core::{
         binding::{BindGroupBuilder, MaterialBindingKey},
         buffer::{Buffer, BufferType, UniformParameters},
-        geometry::{Vertex, VertexBufferLayoutOwned, VertexLayoutKey},
+        geometry::{VertexBufferLayoutOwned, VertexLayoutKey, VertexType},
         render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle, RenderContext},
         resource::BufferHandle,
         texture::Texture,
@@ -605,7 +605,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
         }
     }
 
-    pub fn mesh<T: Vertex>(mut self) -> Self {
+    pub fn mesh<T: VertexType>(mut self) -> Self {
         self.mesh_layout = Some(T::layout());
         self
     }

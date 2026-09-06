@@ -8,7 +8,7 @@ use ahash::AHashMap;
 use crate::{
     application::graphics::Graphics,
     core::{
-        geometry::{Primitive, PrimitiveVertex, Textured, TexturedVertex},
+        geometry::{DefaultVertex, Vertex},
         object_loading::model::Model,
         render::{InstanceControllerHandle, MaterialHandle, MeshHandle, TextureHandle},
     },
@@ -18,14 +18,13 @@ pub fn load_obj(
     obj_data: &[u8],
     mtl_data: Option<&[u8]>,
     gfx: &mut Graphics,
-    textured_material_handle: Option<MaterialHandle>,
-    primitive_material_handle: Option<MaterialHandle>,
+    material_handle: MaterialHandle,
     instance_handle: Option<InstanceControllerHandle>,
 ) -> Option<Model> {
     let obj_cursor = Cursor::new(obj_data);
     let mut obj_reader = BufReader::new(obj_cursor);
 
-    let (models, materials) = tobj::load_obj_buf(
+    let (models, loaded_materials) = tobj::load_obj_buf(
         &mut obj_reader,
         &tobj::LoadOptions {
             triangulate: true,
@@ -38,17 +37,18 @@ pub fn load_obj(
                 .unwrap_or_else(|| Ok((Vec::new(), AHashMap::new())))
         },
     )
-    .unwrap();
+    .ok()?;
 
-    let mut vertices = Vec::<(MeshHandle, Option<TextureHandle>)>::new();
-
+    // Create textures for materials found in the MTL.
     let mut texture_list = Vec::<TextureHandle>::new();
-    if let Ok(materials) = materials {
-        for material in materials {
+
+    if let Ok(loaded_materials) = loaded_materials {
+        for material in loaded_materials {
             let texture = gfx
                 .texture(&material.name)
-                .color(material.diffuse.unwrap_or_default())
+                .color(material.diffuse.unwrap_or([1.0, 1.0, 1.0]))
                 .build();
+
             let texture_handle = gfx
                 .engine
                 .render_context
@@ -58,9 +58,24 @@ pub fn load_obj(
 
             texture_list.push(texture_handle);
         }
-    };
+    }
 
+    // Shared fallback for meshes without an OBJ material.
+    let white_texture = gfx
+        .texture("obj_default_white")
+        .color([1.0, 1.0, 1.0])
+        .build();
+
+    let white_texture_handle = gfx
+        .engine
+        .render_context
+        .gpu_objects
+        .textures
+        .insert(white_texture);
+
+    let mut meshes = Vec::<(MeshHandle, Option<TextureHandle>)>::new();
     let mut materials = HashMap::new();
+
     for model in models {
         println!(
             "name: {:?}, material_id: {:?}, vertices: {}, indices: {}",
@@ -70,100 +85,34 @@ pub fn load_obj(
             model.mesh.indices.len(),
         );
 
-        let texture_handle = if let Some(id) = model.mesh.material_id
-            && let Some(handle) = texture_list.get(id)
-        {
-            Some(*handle)
-        } else {
-            None
-        };
-        if let Some(primitive_material_handle) = primitive_material_handle {
-            let mesh_handle = Primitive::try_from(model)
-                .unwrap()
-                .make_mb(gfx.get_render_context_mut());
-            vertices.push((mesh_handle, texture_handle));
-            let material = primitive_material_handle;
-            materials.insert(mesh_handle, material);
-        } else {
-            let mesh_handle = Textured::try_from(model)
-                .unwrap()
-                .make_mb(gfx.get_render_context_mut());
-            vertices.push((mesh_handle, texture_handle));
-            let base_material = textured_material_handle.unwrap();
-            let material = if let Some(texture_handle) = texture_handle {
-                let texture =
-                    gfx.engine.render_context.gpu_objects.textures[texture_handle].clone();
-                gfx.material_with_texture(base_material, &texture, 1, 0)
-            } else {
-                base_material
-            };
-            materials.insert(mesh_handle, material);
-        }
+        let texture_handle = model
+            .mesh
+            .material_id
+            .and_then(|id| texture_list.get(id).copied())
+            .unwrap_or(white_texture_handle);
+
+        let mesh_handle = Vertex::try_from(model)
+            .ok()?
+            .make_mb(gfx.get_render_context_mut());
+
+        let texture = gfx.engine.render_context.gpu_objects.textures[texture_handle].clone();
+
+        let mesh_material = gfx.material_with_texture(material_handle, &texture, 1, 0);
+
+        meshes.push((mesh_handle, Some(texture_handle)));
+        materials.insert(mesh_handle, mesh_material);
     }
 
-    //creates default handle for instances:
-    let instance_handle = if let Some(handle) = instance_handle {
-        handle
-    } else {
-        gfx.instances().build()
-    };
+    let instance_handle = instance_handle.unwrap_or_else(|| gfx.instances().build());
+
     Some(Model {
-        meshes: vertices,
+        meshes,
         instance: instance_handle,
         materials,
     })
 }
 
-impl TryFrom<tobj::Model> for Primitive {
-    type Error = &'static str;
-
-    fn try_from(model: tobj::Model) -> Result<Self, Self::Error> {
-        let mesh = model.mesh;
-
-        if !mesh.positions.len().is_multiple_of(3) {
-            return Err("OBJ positions are not a multiple of 3");
-        }
-
-        let vertex_count = mesh.positions.len() / 3;
-
-        if !mesh.normals.is_empty() && mesh.normals.len() != vertex_count * 3 {
-            return Err("OBJ normals don't match position count");
-        }
-
-        let vertices = (0..vertex_count)
-            .map(|i| {
-                let position = [
-                    mesh.positions[i * 3],
-                    mesh.positions[i * 3 + 1],
-                    mesh.positions[i * 3 + 2],
-                ];
-
-                let normal = if mesh.normals.is_empty() {
-                    [0.0, 0.0, 0.0]
-                } else {
-                    [
-                        mesh.normals[i * 3],
-                        mesh.normals[i * 3 + 1],
-                        mesh.normals[i * 3 + 2],
-                    ]
-                };
-
-                PrimitiveVertex {
-                    position,
-                    color: [1.0, 1.0, 1.0],
-                    normal,
-                    quad_id: 0,
-                }
-            })
-            .collect();
-
-        Ok(Self {
-            vertices,
-            indices: mesh.indices,
-        })
-    }
-}
-impl TryFrom<tobj::Model> for Textured {
+impl TryFrom<tobj::Model> for Vertex {
     type Error = &'static str;
 
     fn try_from(model: tobj::Model) -> Result<Self, Self::Error> {
@@ -207,7 +156,7 @@ impl TryFrom<tobj::Model> for Textured {
                     ]
                 };
 
-                TexturedVertex {
+                DefaultVertex {
                     position,
                     tex_coords,
                     normal,

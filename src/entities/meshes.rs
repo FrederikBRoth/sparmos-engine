@@ -1,47 +1,47 @@
-const _VERTICES: &[TexturedVertex] = &[
-    TexturedVertex {
+const _VERTICES: &[DefaultVertex] = &[
+    DefaultVertex {
         position: [0.0, 0.0, 0.0],
         tex_coords: [1.0, 0.0],
 
         normal: [0.0, -1.0, 0.0],
     }, // A
-    TexturedVertex {
+    DefaultVertex {
         position: [0.0, 0.0, 1.0],
         tex_coords: [0.0, 0.0],
 
         normal: [0.0, 0.0, 1.0],
     }, // B
-    TexturedVertex {
+    DefaultVertex {
         position: [1.0, 0.0, 0.0],
         tex_coords: [1.0, 1.0],
 
         normal: [0.0, 0.0, 0.0],
     }, // C
-    TexturedVertex {
+    DefaultVertex {
         position: [1.0, 0.0, 1.0],
         tex_coords: [0.0, 1.0],
 
         normal: [1.0, 0.0, 0.0],
     }, // D
-    TexturedVertex {
+    DefaultVertex {
         position: [1.0, 1.0, 0.0],
         tex_coords: [1.0, 0.0],
 
         normal: [0.0, 1.0, 0.0],
     }, // A
-    TexturedVertex {
+    DefaultVertex {
         position: [1.0, 1.0, 1.0],
         tex_coords: [0.0, 0.0],
 
         normal: [0.0, 0.0, 0.0],
     }, // B
-    TexturedVertex {
+    DefaultVertex {
         position: [0.0, 1.0, 0.0],
         tex_coords: [1.0, 1.0],
 
         normal: [0.0, 0.0, -1.0],
     }, // C
-    TexturedVertex {
+    DefaultVertex {
         position: [0.0, 1.0, 1.0],
         tex_coords: [0.0, 1.0],
 
@@ -67,9 +67,7 @@ const _INDICES: &[u16] = &[
     1, 3, 5,   1, 5, 7  // top
 ];
 
-use crate::core::geometry::{
-    Primitive, PrimitiveVertex, Skybox, SkyboxVertex, Textured, TexturedVertex,
-};
+use crate::core::geometry::{DefaultVertex, Skybox, SkyboxVertex, Vertex};
 
 pub enum Meshes {
     Cube,
@@ -81,15 +79,8 @@ impl Meshes {
     pub fn create_skybox() -> Skybox {
         new_skybox()
     }
-    pub fn create_primitive(&self) -> Primitive {
-        match self {
-            Meshes::Cube => new_cube(),
-            Meshes::Sphere => todo!(),
-            Meshes::Plane => todo!(),
-        }
-    }
 
-    pub fn create_textured(&self) -> Textured {
+    pub fn create(&self) -> Vertex {
         match self {
             Meshes::Cube => new_textured_cube(),
             Meshes::Sphere => create_sphere(1.0, 64, 32),
@@ -98,46 +89,46 @@ impl Meshes {
     }
 }
 
-pub fn create_plane() -> Textured {
+pub fn create_plane() -> Vertex {
     let vertices = vec![
         // Top
-        TexturedVertex {
+        DefaultVertex {
             position: [-0.5, 0.0, -0.5],
             normal: [0.0, 1.0, 0.0],
             tex_coords: [0.0, 0.0],
         },
-        TexturedVertex {
+        DefaultVertex {
             position: [0.5, 0.0, -0.5],
             normal: [0.0, 1.0, 0.0],
             tex_coords: [1.0, 0.0],
         },
-        TexturedVertex {
+        DefaultVertex {
             position: [-0.5, 0.0, 0.5],
             normal: [0.0, 1.0, 0.0],
             tex_coords: [0.0, 1.0],
         },
-        TexturedVertex {
+        DefaultVertex {
             position: [0.5, 0.0, 0.5],
             normal: [0.0, 1.0, 0.0],
             tex_coords: [1.0, 1.0],
         },
         // Bottom
-        TexturedVertex {
+        DefaultVertex {
             position: [-0.5, 0.0, -0.5],
             normal: [0.0, -1.0, 0.0],
             tex_coords: [0.0, 0.0],
         },
-        TexturedVertex {
+        DefaultVertex {
             position: [0.5, 0.0, -0.5],
             normal: [0.0, -1.0, 0.0],
             tex_coords: [1.0, 0.0],
         },
-        TexturedVertex {
+        DefaultVertex {
             position: [-0.5, 0.0, 0.5],
             normal: [0.0, -1.0, 0.0],
             tex_coords: [0.0, 1.0],
         },
-        TexturedVertex {
+        DefaultVertex {
             position: [0.5, 0.0, 0.5],
             normal: [0.0, -1.0, 0.0],
             tex_coords: [1.0, 1.0],
@@ -150,110 +141,9 @@ pub fn create_plane() -> Textured {
         4, 5, 6, 5, 7, 6,
     ];
 
-    Textured { vertices, indices }
+    Vertex { vertices, indices }
 }
-pub fn new_cube() -> Primitive {
-    let face_color = [1.0, 0.0, 1.0];
-
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-
-    let mut i = 0u32;
-    let mut push_face = |positions: [[f32; 3]; 6], normal: [f32; 3]| {
-        for pos in positions.iter() {
-            vertices.push(PrimitiveVertex {
-                quad_id: 0,
-                position: *pos,
-                color: face_color,
-                normal,
-            });
-            indices.push(i);
-            i += 1;
-        }
-    };
-
-    // Face vertices (two triangles per face)
-    push_face(
-        [
-            // Front (Z+)
-            [0.0, 0.0, 1.0],
-            [1.0, 0.0, 1.0],
-            [1.0, 1.0, 1.0],
-            [0.0, 0.0, 1.0],
-            [1.0, 1.0, 1.0],
-            [0.0, 1.0, 1.0],
-        ],
-        [0.0, 0.0, 1.0],
-    );
-
-    push_face(
-        [
-            // Back (Z-)
-            [1.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [1.0, 1.0, 0.0],
-        ],
-        [0.0, 0.0, -1.0],
-    );
-
-    push_face(
-        [
-            // Right (X+)
-            [1.0, 0.0, 1.0],
-            [1.0, 0.0, 0.0],
-            [1.0, 1.0, 0.0],
-            [1.0, 0.0, 1.0],
-            [1.0, 1.0, 0.0],
-            [1.0, 1.0, 1.0],
-        ],
-        [1.0, 0.0, 0.0],
-    );
-
-    push_face(
-        [
-            // Left (X-)
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [0.0, 1.0, 1.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 1.0, 1.0],
-            [0.0, 1.0, 0.0],
-        ],
-        [-1.0, 0.0, 0.0],
-    );
-
-    push_face(
-        [
-            // Top (Y+)
-            [0.0, 1.0, 1.0],
-            [1.0, 1.0, 1.0],
-            [1.0, 1.0, 0.0],
-            [0.0, 1.0, 1.0],
-            [1.0, 1.0, 0.0],
-            [0.0, 1.0, 0.0],
-        ],
-        [0.0, 1.0, 0.0],
-    );
-
-    push_face(
-        [
-            // Bottom (Y-)
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [1.0, 0.0, 1.0],
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 1.0],
-            [0.0, 0.0, 1.0],
-        ],
-        [0.0, -1.0, 0.0],
-    );
-
-    Primitive { vertices, indices }
-}
-pub fn new_textured_cube() -> Textured {
+pub fn new_textured_cube() -> Vertex {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -261,7 +151,7 @@ pub fn new_textured_cube() -> Textured {
 
     let mut push_face = |positions: [[f32; 3]; 6], uvs: [[f32; 2]; 6], normal: [f32; 3]| {
         for (pos, uv) in positions.iter().zip(uvs.iter()) {
-            vertices.push(TexturedVertex {
+            vertices.push(DefaultVertex {
                 position: *pos,
                 tex_coords: *uv,
                 normal,
@@ -365,11 +255,11 @@ pub fn new_textured_cube() -> Textured {
         [0.0, -1.0, 0.0],
     );
 
-    Textured { vertices, indices }
+    Vertex { vertices, indices }
 }
 use std::f32::consts::PI;
 
-pub fn create_sphere(radius: f32, segments: u32, rings: u32) -> Textured {
+pub fn create_sphere(radius: f32, segments: u32, rings: u32) -> Vertex {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
@@ -399,7 +289,7 @@ pub fn create_sphere(radius: f32, segments: u32, rings: u32) -> Textured {
 
             let tex_coords = [u, v];
 
-            vertices.push(TexturedVertex {
+            vertices.push(DefaultVertex {
                 position,
                 normal,
                 tex_coords,
@@ -424,7 +314,7 @@ pub fn create_sphere(radius: f32, segments: u32, rings: u32) -> Textured {
         }
     }
 
-    Textured { vertices, indices }
+    Vertex { vertices, indices }
 }
 
 pub fn new_skybox() -> Skybox {
