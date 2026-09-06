@@ -4,12 +4,12 @@ use hecs::Entity;
 use crate::core::{
     engine::DefaultSystem,
     entities::World,
+    instance::Transform,
     physics::{
         collision::{Collider, Collision},
         rigidbody::{BodyType, RigidBody},
         solver::{ImpulseSolver, PositionSolver, Solver},
     },
-    render::Renderable,
 };
 const PHYSICS_DT: f32 = 1.0 / 60.0;
 
@@ -27,36 +27,19 @@ impl PhysicsSystem {
             solvers: vec![Box::new(ImpulseSolver), Box::new(PositionSolver)],
         }
     }
-}
 
-impl DefaultSystem for PhysicsSystem {
-    fn run(
-        &mut self,
-        world: &mut World,
-        resources: &mut crate::core::render::RenderContext,
-        dt: std::time::Duration,
-    ) {
+    /// Advance physics without requiring any rendering resources.
+    pub fn advance(&mut self, world: &mut World, dt: std::time::Duration) {
         self.current_dt += dt.as_secs_f32();
 
         while self.current_dt >= PHYSICS_DT {
-            world.query::<(&Renderable, &mut RigidBody)>(|mut query| {
-                for (renderable, rigidbody) in query.iter() {
-                    let instances = resources.gpu_objects.instance_controllers
-                        [renderable.instance_controller_handle]
-                        .instances_mut();
-                    debug_assert_eq!(
-                        instances.len(),
-                        1,
-                        "physics entities currently require exactly one instance"
-                    );
-
+            world.query::<(&mut Transform, &mut RigidBody)>(|mut query| {
+                for (transform, rigidbody) in query.iter() {
                     if matches!(rigidbody.body_type, BodyType::Dynamic) {
                         let acceleration = self.gravity + rigidbody.force * rigidbody.inv_mass();
                         rigidbody.velocity += acceleration * PHYSICS_DT;
 
-                        if let Some(instance) = instances.first_mut() {
-                            instance.transform.position += rigidbody.velocity * PHYSICS_DT;
-                        }
+                        transform.position += rigidbody.velocity * PHYSICS_DT;
                     }
 
                     rigidbody.force = vec3(0.0, 0.0, 0.0);
@@ -64,25 +47,14 @@ impl DefaultSystem for PhysicsSystem {
             });
 
             let mut candidates = vec![];
-            world.query::<(Entity, &Renderable, &Collider, &RigidBody)>(|mut query| {
-                for (entity, renderable, collider, rigidbody) in query.iter() {
-                    let instances = resources.gpu_objects.instance_controllers
-                        [renderable.instance_controller_handle]
-                        .instances();
-                    debug_assert_eq!(
-                        instances.len(),
-                        1,
-                        "physics entities currently require exactly one instance"
-                    );
-
-                    if let Some(instance) = instances.first() {
-                        candidates.push(PhysicsCandidate {
-                            entity,
-                            collider: collider.clone(),
-                            transform: instance.transform.clone(),
-                            is_static: matches!(rigidbody.body_type, BodyType::Static),
-                        });
-                    }
+            world.query::<(Entity, &Transform, &Collider, &RigidBody)>(|mut query| {
+                for (entity, transform, collider, rigidbody) in query.iter() {
+                    candidates.push(PhysicsCandidate {
+                        entity,
+                        collider: collider.clone(),
+                        transform: transform.clone(),
+                        is_static: matches!(rigidbody.body_type, BodyType::Static),
+                    });
                 }
             });
 
@@ -98,19 +70,30 @@ impl DefaultSystem for PhysicsSystem {
                     Collider::collision(&a.collider, &a.transform, &b.collider, &b.transform);
                 if points.has_collision {
                     collisions.push(Collision {
-                        object_a: (a.entity, 0),
-                        object_b: (b.entity, 0),
+                        object_a: a.entity,
+                        object_b: b.entity,
                         collision_points: points,
                     });
                 }
             }
 
             for solver in self.solvers.iter() {
-                solver.solve(world, &collisions, PHYSICS_DT, resources);
+                solver.solve(world, &collisions, PHYSICS_DT);
             }
 
             self.current_dt -= PHYSICS_DT
         }
+    }
+}
+
+impl DefaultSystem for PhysicsSystem {
+    fn run(
+        &mut self,
+        world: &mut World,
+        _resources: &mut crate::core::render::RenderContext,
+        dt: std::time::Duration,
+    ) {
+        self.advance(world, dt);
     }
 }
 

@@ -2,30 +2,29 @@ use cgmath::{InnerSpace, Vector3};
 
 use crate::core::{
     entities::World,
+    instance::Transform,
     physics::{
         collision::Collision,
         rigidbody::{BodyType, RigidBody},
     },
-    render::{RenderContext, Renderable},
 };
 
 pub trait Solver {
-    fn solve(&self, world: &mut World, collision: &[Collision], dt: f32, rc: &mut RenderContext);
+    fn solve(&self, world: &mut World, collision: &[Collision], dt: f32);
 }
 pub struct PositionSolver;
 
 impl Solver for PositionSolver {
-    fn solve(&self, world: &mut World, collisions: &[Collision], _dt: f32, rc: &mut RenderContext) {
+    fn solve(&self, world: &mut World, collisions: &[Collision], _dt: f32) {
         for collision in collisions {
-            let mut query_a = world
+            let [a, b] = world
                 .entities
-                .query_one::<(&Renderable, &RigidBody)>(collision.object_a.0);
-            let (renderable_a, rigidbody_a) = query_a.get().unwrap();
-
-            let mut query_b = world
-                .entities
-                .query_one::<(&Renderable, &RigidBody)>(collision.object_b.0);
-            let (renderable_b, rigidbody_b) = query_b.get().unwrap();
+                .query_disjoint_mut::<(&mut Transform, &RigidBody), 2>([
+                    collision.object_a,
+                    collision.object_b,
+                ]);
+            let (transform_a, rigidbody_a) = a.expect("collision A needs Transform and RigidBody");
+            let (transform_b, rigidbody_b) = b.expect("collision B needs Transform and RigidBody");
 
             let Some((movement_a, movement_b)) = position_movements(
                 collision.collision_points.normal,
@@ -36,18 +35,8 @@ impl Solver for PositionSolver {
                 continue;
             };
 
-            let instance_a = rc.gpu_objects.instance_controllers
-                [renderable_a.instance_controller_handle]
-                .instances_mut()
-                .get_mut(collision.object_a.1)
-                .unwrap();
-            instance_a.transform.position += movement_a;
-            let instance_b = rc.gpu_objects.instance_controllers
-                [renderable_b.instance_controller_handle]
-                .instances_mut()
-                .get_mut(collision.object_b.1)
-                .unwrap();
-            instance_b.transform.position += movement_b;
+            transform_a.position += movement_a;
+            transform_b.position += movement_b;
         }
     }
 }
@@ -55,23 +44,14 @@ impl Solver for PositionSolver {
 pub struct ImpulseSolver;
 
 impl Solver for ImpulseSolver {
-    fn solve(
-        &self,
-        world: &mut World,
-        collisions: &[Collision],
-        _dt: f32,
-        _rc: &mut RenderContext,
-    ) {
+    fn solve(&self, world: &mut World, collisions: &[Collision], _dt: f32) {
         for collision in collisions {
             let [a, b] = world
                 .entities
-                .query_disjoint_mut::<(&Renderable, &mut RigidBody), 2>([
-                    collision.object_a.0,
-                    collision.object_b.0,
-                ]);
+                .query_disjoint_mut::<&mut RigidBody, 2>([collision.object_a, collision.object_b]);
 
-            let (_, body_a) = a.unwrap();
-            let (_, body_b) = b.unwrap();
+            let body_a = a.expect("collision A needs RigidBody");
+            let body_b = b.expect("collision B needs RigidBody");
 
             let a_inv_mass = body_a.inv_mass();
             let b_inv_mass = body_b.inv_mass();

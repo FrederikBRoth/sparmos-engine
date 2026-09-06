@@ -16,12 +16,12 @@ use crate::application::graphics::Graphics;
 use crate::application::gui::EguiRenderer;
 use crate::core::engine::{Arguments, Engine, EngineCommandQueue, EngineTime, Systems};
 use crate::core::entities::World;
-use crate::core::object_loading::model::Model;
+
 use crate::core::post_processing::PostProcessHandler;
-use crate::core::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext, Renderable};
+use crate::core::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext};
 use crate::core::resource::Resources;
 use crate::core::texture::Texture;
-use crate::systems::animation::AnimationHandler;
+
 use crate::systems::compute::ReadbackState;
 
 pub enum DeviceBackend {
@@ -329,57 +329,10 @@ impl State {
     //
     pub fn update(&mut self, dt: std::time::Duration) {
         self.graphics.engine.engine_time.update_time(dt, true);
-        {
-            self.graphics
-                .world
-                .borrow()
-                .query::<(&Renderable, &mut AnimationHandler)>(|mut query| {
-                    for (renderable, ah) in query.iter() {
-                        // ah.animate(dt.as_secs_f32());
-                        let ic = self
-                            .graphics
-                            .engine
-                            .render_context
-                            .gpu_objects
-                            .instance_controllers
-                            .get_mut(renderable.instance_controller_handle)
-                            .unwrap();
-
-                        ah.update_instance(dt.as_secs_f32(), ic.instances_mut().as_mut());
-                    }
-                });
-        }
-        {
-            self.graphics
-                .world
-                .borrow()
-                .query::<&Renderable>(|mut query| {
-                    for renderable in query.iter() {
-                        self.graphics
-                            .engine
-                            .render_context
-                            .gpu_objects
-                            .instance_controllers
-                            .get_mut(renderable.instance_controller_handle)
-                            .unwrap()
-                            .update(&self.graphics.engine.render_context.queue);
-                    }
-                });
-
-            self.graphics.world.borrow().query::<&Model>(|mut query| {
-                for renderable in query.iter() {
-                    self.graphics
-                        .engine
-                        .render_context
-                        .gpu_objects
-                        .instance_controllers
-                        .get_mut(renderable.instance)
-                        .unwrap()
-                        .update(&self.graphics.engine.render_context.queue);
-                }
-            });
-        }
+        self.graphics.update_render_animations(dt);
         self.graphics.run_all_systems();
+        self.graphics.sync_render_instances();
+        self.graphics.update_instance_controllers();
     }
 
     pub fn render(&mut self, _dt: std::time::Duration, _game: &mut Box<dyn Game>) {

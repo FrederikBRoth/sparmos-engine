@@ -1,11 +1,15 @@
-use web_time::Instant;
+use std::collections::HashSet;
 
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Rotation, Vector3};
 use hecs::Entity;
 
 use crate::{
     application::graphics::Graphics,
-    core::{entities::World, instance::Transform, render::Renderable},
+    core::{
+        entities::World,
+        instance::Transform,
+        render::{GpuObjects, RenderBatchRef, RenderInstanceRef},
+    },
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -16,8 +20,8 @@ pub struct RayHit {
 }
 
 pub struct Collision {
-    pub object_a: (Entity, usize),
-    pub object_b: (Entity, usize),
+    pub object_a: Entity,
+    pub object_b: Entity,
     pub collision_points: CollisionPoints,
 }
 
@@ -320,102 +324,93 @@ pub struct Ray {
 }
 
 impl Ray {
-    //Only uses AABB collision for checks. Will not be completely precise for more complex colliders
-    pub fn broad_intersects<'a>(&self, world: &World, gfx: &mut Graphics) -> Option<RayHit> {
-        let mut closest: Option<RayHit> = None;
-
-        world.query::<(Entity, (&Renderable, &Collider))>(|mut query| {
-            for (entity, (r, c)) in query.iter() {
-                let ic = gfx
-                    .engine
-                    .get_instance_controller(&r.instance_controller_handle);
-                for (i, instance) in ic.instances().iter().enumerate() {
-                    if !instance.should_render {
-                        continue;
-                    }
-                    let aabb = c.aabb(&instance.transform);
-                    if let Some(distance) = ray_aabb(self, &aabb) {
-                        if closest
-                            .map(|collision| distance < collision.distance)
-                            .unwrap_or(true)
-                        {
-                            closest = Some(RayHit {
-                                entity_handle: entity,
-                                instance_index: i,
-                                distance,
-                            });
-                        }
-                    }
-                }
-            }
-        });
-
-        closest
+    // Only uses AABB collision for checks.
+    pub fn broad_intersects(&self, world: &World, gfx: &mut Graphics) -> Option<RayHit> {
+        self.intersects_objects(world, &gfx.engine.render_context.gpu_objects, false)
     }
 
-    pub fn precise_intersects<'a>(&self, world: &World, gfx: &mut Graphics) -> Option<RayHit> {
-        let now = Instant::now();
-        let mut broad_hits: Vec<RayHit> = vec![];
+    pub fn precise_intersects(&self, world: &World, gfx: &mut Graphics) -> Option<RayHit> {
+        self.intersects_objects(world, &gfx.engine.render_context.gpu_objects, true)
+    }
 
-        world.query::<(Entity, (&Renderable, &Collider))>(|mut query| {
-            for (entity, (r, c)) in query.iter() {
-                let ic = gfx
-                    .engine
-                    .get_instance_controller(&r.instance_controller_handle);
-                for (i, instance) in ic.instances().iter().enumerate() {
-                    if !instance.should_render {
-                        continue;
-                    }
-
-                    let aabb = c.aabb(&instance.transform);
-                    if let Some(distance) = ray_aabb(self, &aabb) {
-                        broad_hits.push(RayHit {
-                            entity_handle: entity,
-                            instance_index: i,
-                            distance,
-                        });
-                    }
-                }
-            }
-        });
-
-        broad_hits.sort_by(|a, b| a.distance.total_cmp(&b.distance));
-
+    fn intersects_objects(
+        &self,
+        world: &World,
+        objects: &GpuObjects,
+        precise: bool,
+    ) -> Option<RayHit> {
         let mut closest: Option<RayHit> = None;
-        for entity in broad_hits {
-            let mut query = world
-                .entities
-                .query_one::<(&Renderable, &Collider)>(entity.entity_handle);
-
-            let Ok((renderable, collider)) = query.get() else {
-                continue;
+        let mut test = |entity, instance_index, collider: &Collider, transform: &Transform| {
+            let Some(broad_distance) = ray_aabb(self, &collider.aabb(transform)) else {
+                return;
             };
-
-            let instance = gfx
-                .engine
-                .get_instance_controller(&renderable.instance_controller_handle)
-                .instances()[entity.instance_index]
-                .clone();
-
-            if let Some(distance) = collider.precise_ray_intersection(self, &instance.transform) {
-                if closest
-                    .map(|collision| distance < collision.distance)
-                    .unwrap_or(true)
-                {
+            let distance = if precise {
+                collider.precise_ray_intersection(self, transform)
+            } else {
+                Some(broad_distance)
+            };
+            if let Some(distance) = distance {
+                if closest.map(|hit| distance < hit.distance).unwrap_or(true) {
                     closest = Some(RayHit {
-                        entity_handle: entity.entity_handle,
-                        instance_index: entity.instance_index,
+                        entity_handle: entity,
+                        instance_index,
                         distance,
                     });
                 }
             }
-        }
-        let elapsed = now.elapsed().as_micros();
-        println!("Raytrace: Finish {:?}", elapsed);
+        };
+
+        // Linked slots belong to individual entities even if a batch also has a collider.
+        // Stream batch instances so picking a large voxel batch needs no candidate copies.
+        let mut linked_slots = HashSet::new();
+        world.query::<&RenderInstanceRef>(|mut query| {
+            for render_ref in query.iter() {
+                objects.render_instance(*render_ref); // Validate even when there is no collider.
+                let batch = objects
+                    .renderable(render_ref.batch)
+                    .expect("invalid RenderBatchHandle");
+                linked_slots.insert((batch.instance_controller_handle, render_ref.instance_index));
+            }
+        });
+        world.query::<(Entity, &Transform, &Collider, Option<&RenderInstanceRef>)>(|mut query| {
+            for (entity, transform, collider, render_ref) in query.iter() {
+                let instance_index = if let Some(render_ref) = render_ref {
+                    if !objects.render_instance(*render_ref).should_render {
+                        continue;
+                    }
+                    render_ref.instance_index
+                } else {
+                    0
+                };
+                test(entity, instance_index, collider, transform);
+            }
+        });
+        let mut tested_slots = HashSet::new();
+        world.query::<(Entity, &RenderBatchRef, &Collider)>(|query| {
+            for (entity, batch_ref, collider) in query.without::<&Transform>().iter() {
+                let batch = objects
+                    .renderable(batch_ref.batch)
+                    .expect("invalid RenderBatchHandle");
+                let controller = objects
+                    .instance_controllers
+                    .get(batch.instance_controller_handle)
+                    .expect("invalid InstanceControllerHandle");
+                // Multiple group entities may refer to one controller; visit it once.
+                if !tested_slots.insert(batch.instance_controller_handle) {
+                    continue;
+                }
+                for (index, instance) in controller.instances().iter().enumerate() {
+                    if instance.should_render
+                        && !linked_slots.contains(&(batch.instance_controller_handle, index))
+                    {
+                        test(entity, index, collider, &instance.transform);
+                    }
+                }
+            }
+        });
         closest
     }
 }
-
 pub fn ray_aabb(ray: &Ray, aabb: &Aabb) -> Option<f32> {
     let inv_dir = Vector3::new(
         1.0 / ray.direction.x,

@@ -6,6 +6,7 @@ pub enum BodyType {
     Dynamic,
     Kinematic,
 }
+#[derive(Clone, Debug)]
 pub struct RigidBody {
     pub body_type: BodyType,
 

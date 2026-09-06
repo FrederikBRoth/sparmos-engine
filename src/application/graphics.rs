@@ -1,6 +1,6 @@
-use std::{cell::RefCell, mem, rc::Rc, sync::Arc, time::Duration};
+use std::{cell::RefCell, collections::HashSet, mem, rc::Rc, sync::Arc, time::Duration};
 
-use cgmath::{InnerSpace, Quaternion, Rotation3, Vector2, Vector3, Zero};
+use cgmath::{Quaternion, Rotation3, Vector3};
 use hecs::{DynamicBundle, Entity, Query, QueryBorrow};
 use wgpu::{Device, Queue};
 
@@ -11,20 +11,29 @@ use crate::{
         engine::{
             Engine,
             EngineCommandQueue::{self, AddEntity},
-            GpuBindableSystem, System,
+            System,
         },
         entities::World,
         geometry::{ModelBuilder, Skybox, Vertex},
-        instance::{DefaultInstanceLayout, InstanceBuilder, RawInstance},
+        instance::{
+            DefaultInstanceLayout, InstanceBuilder, InstanceControllerTrait, RawInstance, Transform,
+        },
+        physics::{collision::Collider, rigidbody::RigidBody},
         pipelines::{
             ComputeRenderingBuilder, MaterialBuilder, PipelineConfig, RenderPipelineBuilder,
         },
-        render::{ComputeHandle, MaterialHandle, RenderContext, SkyboxRenderable},
+        render::{
+            ComputeHandle, InstanceControllerHandle, MaterialHandle, MeshHandle, RenderBatchRef,
+            RenderContext, RenderInstanceRef, Renderable, RenderableHandle, SkyboxRenderable,
+        },
         resource::BufferHandle,
         texture::{PbrTextureBuilder, Texture, TextureBuilder},
     },
     entities::meshes::Meshes,
-    systems::compute::{ComputeBuilder, ReadbackState},
+    systems::{
+        animation::AnimationHandler,
+        compute::{ComputeBuilder, ReadbackState},
+    },
 };
 
 pub struct Graphics {
@@ -32,8 +41,197 @@ pub struct Graphics {
     pub engine: Engine,
 }
 
+pub struct PhysicsRenderBatch {
+    pub batch: RenderableHandle,
+    pub entities: Vec<Entity>,
+}
+
 //Main API access to all functions required for rendering objects
 impl Graphics {
+    pub fn add_renderable(
+        &mut self,
+        material_handle: MaterialHandle,
+        mesh_handle: MeshHandle,
+        instance_controller_handle: InstanceControllerHandle,
+    ) -> RenderableHandle {
+        let objects = &mut self.engine.render_context.gpu_objects;
+        objects.add_renderable(Renderable {
+            material_handle,
+            mesh_handle,
+            instance_controller_handle,
+        })
+    }
+
+    pub fn get_renderable(&self, handle: RenderableHandle) -> &Renderable {
+        self.engine
+            .render_context
+            .gpu_objects
+            .renderable(handle)
+            .expect("invalid RenderBatchHandle")
+    }
+
+    pub fn get_renderable_mut(&mut self, handle: RenderableHandle) -> &mut Renderable {
+        self.engine
+            .render_context
+            .gpu_objects
+            .renderable_mut(handle)
+            .expect("invalid RenderBatchHandle")
+    }
+
+    /// Only render-only instances may have their transforms edited directly.
+    /// Linked instance transforms must be changed through their ECS entity.
+    pub fn get_instance_controller(
+        &mut self,
+        batch: RenderableHandle,
+    ) -> &mut Box<dyn InstanceControllerTrait> {
+        let handle = self.get_renderable(batch).instance_controller_handle;
+        self.engine
+            .render_context
+            .gpu_objects
+            .instance_controllers
+            .get_mut(handle)
+            .expect("invalid InstanceControllerHandle")
+    }
+
+    pub fn change_renderable_shader(&mut self, renderable: RenderableHandle, shader: &str) {
+        let material = self.get_renderable(renderable).material_handle;
+        self.change_shader(&material, shader);
+    }
+
+    /// Register one body. A controller slot may have only one ECS transform owner.
+    pub fn spawn_physics_for_instance(
+        &mut self,
+        renderable: RenderableHandle,
+        instance_index: usize,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> Entity {
+        let render_ref = RenderInstanceRef {
+            batch: renderable,
+            instance_index,
+        };
+        let transform = self
+            .engine
+            .render_context
+            .gpu_objects
+            .render_instance(render_ref)
+            .transform
+            .clone();
+        self.spawn_physics_transforms(
+            renderable,
+            vec![(instance_index, transform)],
+            collider,
+            rigid_body,
+        )[0]
+    }
+
+    /// Register every existing instance as an independent body in the same batch.
+    pub fn spawn_physics_for_renderable(
+        &mut self,
+        batch: RenderableHandle,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> Vec<Entity> {
+        let transforms: Vec<Transform> = self
+            .get_instance_controller(batch)
+            .instances()
+            .iter()
+            .map(|instance| instance.transform.clone())
+            .collect();
+        self.spawn_physics_transforms(
+            batch,
+            transforms.into_iter().enumerate().collect(),
+            collider,
+            rigid_body,
+        )
+    }
+
+    fn spawn_physics_transforms(
+        &mut self,
+        batch: RenderableHandle,
+        transforms: Vec<(usize, Transform)>,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> Vec<Entity> {
+        let bundles = transforms.into_iter().map(|(instance_index, transform)| {
+            (
+                transform,
+                collider.clone(),
+                rigid_body.clone(),
+                RenderInstanceRef {
+                    batch,
+                    instance_index,
+                },
+            )
+        });
+        let world = Rc::clone(&self.world);
+        if let Ok(mut world) = world.try_borrow_mut() {
+            bundles.map(|bundle| world.add_entity(bundle)).collect()
+        } else {
+            // Game callbacks borrow the world. Queue the whole batch and revalidate
+            // once when inserted, so pending registrations cannot claim a slot twice.
+            let world = world.borrow();
+            let pending: Vec<_> = bundles
+                .map(|bundle| (world.entities.reserve_entity(), bundle))
+                .collect();
+            let entities = pending.iter().map(|(entity, _)| *entity).collect();
+            self.engine
+                .render_commands
+                .push(AddEntity(Box::new(move |world| {
+                    for (entity, bundle) in pending {
+                        world
+                            .insert(entity, bundle)
+                            .expect("reserved physics entity must exist");
+                    }
+                })));
+            entities
+        }
+    }
+    pub fn add_physics_entity(
+        &mut self,
+        material: MaterialHandle,
+        mesh: MeshHandle,
+        instance_controller: InstanceControllerHandle,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> PhysicsRenderBatch {
+        let batch = self.add_renderable(material, mesh, instance_controller);
+        let entities = self.spawn_physics_for_renderable(batch, collider, rigid_body);
+        PhysicsRenderBatch { batch, entities }
+    }
+
+    pub(crate) fn update_render_animations(&mut self, dt: Duration) {
+        let objects = &mut self.engine.render_context.gpu_objects;
+        self.world
+            .borrow()
+            .query::<(&RenderBatchRef, &mut AnimationHandler)>(|mut query| {
+                for (batch_ref, animation) in query.iter() {
+                    let batch = objects
+                        .renderable(batch_ref.batch)
+                        .expect("invalid RenderBatchHandle");
+                    let handle = batch.instance_controller_handle;
+                    let controller = objects
+                        .instance_controllers
+                        .get_mut(handle)
+                        .expect("invalid InstanceControllerHandle");
+                    animation.update_instance(dt.as_secs_f32(), controller.instances_mut());
+                }
+            });
+    }
+    pub(crate) fn sync_render_instances(&mut self) {
+        self.engine
+            .render_context
+            .gpu_objects
+            .sync_render_instances(&self.world.borrow());
+    }
+
+    pub(crate) fn update_instance_controllers(&mut self) {
+        let context = &mut self.engine.render_context;
+        for (_, controller) in context.gpu_objects.instance_controllers.iter_mut() {
+            controller.update(&context.queue);
+        }
+    }
+
     pub(crate) fn run_all_systems(&mut self) {
         self.engine.systems.run_all(
             &mut self.world,
