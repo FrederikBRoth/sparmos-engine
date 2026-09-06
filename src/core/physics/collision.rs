@@ -8,7 +8,7 @@ use crate::{
     core::{
         entities::World,
         instance::Transform,
-        render::{GpuObjects, RenderBatchRef, RenderInstanceRef},
+        render::{GpuObjects, RenderInstanceRef, RenderableHandle},
     },
 };
 
@@ -212,11 +212,15 @@ fn sphere_sphere_collision(
 
         let distance = ab.magnitude();
 
-        if distance < 0.00001 || distance > a_radius + b_radius {
+        if distance > a_radius + b_radius {
             return Ok(CollisionPoints::default());
         }
 
-        let normal = ab.normalize();
+        let normal = if distance > 0.00001 {
+            ab / distance
+        } else {
+            Vector3::unit_y()
+        };
 
         let point_a = at.position + normal * a_radius;
         let point_b = bt.position - normal * b_radius;
@@ -386,10 +390,10 @@ impl Ray {
             }
         });
         let mut tested_slots = HashSet::new();
-        world.query::<(Entity, &RenderBatchRef, &Collider)>(|query| {
-            for (entity, batch_ref, collider) in query.without::<&Transform>().iter() {
+        world.query::<(Entity, &RenderableHandle, &Collider)>(|query| {
+            for (entity, renderable, collider) in query.without::<&Transform>().iter() {
                 let batch = objects
-                    .renderable(batch_ref.batch)
+                    .renderable(*renderable)
                     .expect("invalid RenderBatchHandle");
                 let controller = objects
                     .instance_controllers

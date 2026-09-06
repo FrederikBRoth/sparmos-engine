@@ -23,8 +23,8 @@ use crate::{
             ComputeRenderingBuilder, MaterialBuilder, PipelineConfig, RenderPipelineBuilder,
         },
         render::{
-            ComputeHandle, InstanceControllerHandle, MaterialHandle, MeshHandle, RenderBatchRef,
-            RenderContext, RenderInstanceRef, Renderable, RenderableHandle, SkyboxRenderable,
+            ComputeHandle, InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext,
+            RenderInstanceRef, Renderable, RenderableHandle, SkyboxRenderable,
         },
         resource::BufferHandle,
         texture::{PbrTextureBuilder, Texture, TextureBuilder},
@@ -204,10 +204,10 @@ impl Graphics {
         let objects = &mut self.engine.render_context.gpu_objects;
         self.world
             .borrow()
-            .query::<(&RenderBatchRef, &mut AnimationHandler)>(|mut query| {
+            .query::<(&RenderableHandle, &mut AnimationHandler)>(|mut query| {
                 for (batch_ref, animation) in query.iter() {
                     let batch = objects
-                        .renderable(batch_ref.batch)
+                        .renderable(*batch_ref)
                         .expect("invalid RenderBatchHandle");
                     let handle = batch.instance_controller_handle;
                     let controller = objects

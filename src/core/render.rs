@@ -61,12 +61,6 @@ pub struct Renderable {
     pub instance_controller_handle: InstanceControllerHandle,
 }
 
-/// Optional ECS owner for batch animation, gameplay, or picking.
-#[derive(Clone, Copy, Debug)]
-pub struct RenderBatchRef {
-    pub batch: RenderableHandle,
-}
-
 /// ECS `Transform` is authoritative for this instance; render sync mirrors it.
 /// Each controller slot may have only one ECS owner. Batch animation and direct
 /// instance transform edits are reserved for render-only controllers.
