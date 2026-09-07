@@ -1,4 +1,7 @@
-use std::mem;
+use std::{
+    hash::{Hash, Hasher},
+    mem,
+};
 use wgpu::util::DeviceExt;
 
 use crate::{
@@ -140,6 +143,11 @@ impl VertexType for Vertex {
 }
 impl Vertex {
     pub fn make_mb(&self, rc: &mut RenderContext) -> MeshHandle {
+        let key = MeshKey::new(&self.vertices, &self.indices);
+        if let Some(handle) = rc.gpu_objects.mesh_lookup.get(&key) {
+            return *handle;
+        }
+
         let mesh = Mesh::new(
             &rc.device,
             &self.vertices,
@@ -147,8 +155,53 @@ impl Vertex {
             self.vertices.len() as u32,
             self.indices.len() as u32,
         );
-        rc.gpu_objects.meshes.insert(mesh)
+        let handle = rc.gpu_objects.meshes.insert(mesh);
+        rc.gpu_objects.mesh_lookup.insert(key, handle);
+        handle
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MeshKey {
+    vertex_hash: u64,
+    index_hash: u64,
+    vertex_stride: usize,
+    vertex_count: u32,
+    index_count: u32,
+}
+
+impl MeshKey {
+    pub fn new<T: bytemuck::Pod>(vertices: &[T], indices: &[u32]) -> Self {
+        Self::from_bytes(
+            bytemuck::cast_slice(vertices),
+            bytemuck::cast_slice(indices),
+            std::mem::size_of::<T>(),
+            vertices.len() as u32,
+            indices.len() as u32,
+        )
+    }
+
+    pub fn from_bytes(
+        vertices: &[u8],
+        indices: &[u8],
+        vertex_stride: usize,
+        vertex_count: u32,
+        index_count: u32,
+    ) -> Self {
+        Self {
+            vertex_hash: hash_bytes(vertices),
+            index_hash: hash_bytes(indices),
+            vertex_stride,
+            vertex_count,
+            index_count,
+        }
+    }
+}
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
 }
 pub struct Mesh {
     pub vertex_count: u32,

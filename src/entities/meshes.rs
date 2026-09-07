@@ -73,6 +73,7 @@ pub enum Meshes {
     Cube,
     Sphere,
     Plane,
+    Sprite,
 }
 
 impl Meshes {
@@ -85,8 +86,64 @@ impl Meshes {
             Meshes::Cube => new_textured_cube(),
             Meshes::Sphere => create_sphere(1.0, 64, 32),
             Meshes::Plane => create_plane(),
+            Meshes::Sprite => create_sprite(),
         }
     }
+}
+
+/// An upright, two-sided quad whose X/Y axes map directly to sprite width/height.
+pub fn create_sprite() -> Vertex {
+    let vertices = vec![
+        // Front, facing -Z.
+        DefaultVertex {
+            position: [-0.5, -0.5, 0.0],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [0.0, 1.0],
+        },
+        DefaultVertex {
+            position: [0.5, -0.5, 0.0],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [1.0, 1.0],
+        },
+        DefaultVertex {
+            position: [-0.5, 0.5, 0.0],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [0.0, 0.0],
+        },
+        DefaultVertex {
+            position: [0.5, 0.5, 0.0],
+            normal: [0.0, 0.0, -1.0],
+            tex_coords: [1.0, 0.0],
+        },
+        // Back, facing +Z.
+        DefaultVertex {
+            position: [-0.5, -0.5, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [0.0, 1.0],
+        },
+        DefaultVertex {
+            position: [0.5, -0.5, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [1.0, 1.0],
+        },
+        DefaultVertex {
+            position: [-0.5, 0.5, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [0.0, 0.0],
+        },
+        DefaultVertex {
+            position: [0.5, 0.5, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [1.0, 0.0],
+        },
+    ];
+
+    let indices = vec![
+        0, 2, 1, 1, 2, 3, // -Z
+        4, 5, 6, 5, 7, 6, // +Z
+    ];
+
+    Vertex { vertices, indices }
 }
 
 pub fn create_plane() -> Vertex {

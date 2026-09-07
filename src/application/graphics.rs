@@ -316,7 +316,7 @@ impl Graphics {
         InstanceBuilder::<I> {
             gfx: self,
             origin: Vector3::new(0.0, 0.0, 0.0),
-            global_size: 1.0,
+            global_scale: Vector3::new(1.0, 1.0, 1.0),
             template: None,
             phantom_data: Default::default(),
             instances: vec![],

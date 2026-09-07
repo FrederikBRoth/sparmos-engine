@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use cgmath::{InnerSpace, Quaternion, Rotation3, Vector2, Vector3, Zero};
+use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Rotation3, Vector2, Vector3, Zero};
 
 use crate::{
     application::graphics::Graphics,
@@ -11,8 +11,7 @@ use crate::{
 pub struct Transform {
     pub position: Vector3<f32>,
     pub rotation: Quaternion<f32>,
-    //simple scale at this point
-    pub scale: f32,
+    pub scale: Vector3<f32>,
 }
 
 impl Default for Transform {
@@ -23,7 +22,7 @@ impl Default for Transform {
                 cgmath::Vector3::unit_z(),
                 cgmath::Deg(0.0),
             ), // Identity rotation,
-            scale: 1.0,
+            scale: [1.0, 1.0, 1.0].into(),
         }
     }
 }
@@ -162,8 +161,8 @@ pub struct Instance {
     pub should_render: bool,
     pub color: cgmath::Vector3<f32>,
     pub size: cgmath::Vector3<f32>,
+    pub uv: cgmath::Vector4<f32>,
 }
-
 impl Default for Instance {
     fn default() -> Self {
         Self {
@@ -172,12 +171,13 @@ impl Default for Instance {
             should_render: true,
             color: cgmath::Vector3::new(1.0, 1.0, 1.0), // white
             size: cgmath::Vector3::new(1.0, 1.0, 1.0),
+            uv: cgmath::Vector4::new(0.0, 0.0, 0.0, 0.0),
         }
     }
 }
 
 impl Instance {
-    pub fn new(position: cgmath::Vector3<f32>, scale: f32) -> Self {
+    pub fn new(position: cgmath::Vector3<f32>, scale: cgmath::Vector3<f32>) -> Self {
         Self {
             transform: Transform {
                 position,
@@ -185,6 +185,67 @@ impl Instance {
                 ..Default::default()
             },
             ..Default::default()
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SpriteInstanceLayout {
+    pub position: [f32; 3],
+    pub scale: [f32; 3],
+    pub rotation: [f32; 4],
+    pub color: [f32; 3],
+    pub uv_rect: [f32; 4],
+}
+
+impl RawInstance for SpriteInstanceLayout {
+    fn to_raw(instance: &Instance) -> Self {
+        Self {
+            position: instance.transform.position.into(),
+            scale: instance.transform.scale.into(),
+            rotation: instance.transform.rotation.into(),
+            color: instance.color.into(),
+            uv_rect: instance.uv.into(),
+        }
+    }
+
+    fn layout() -> VertexBufferLayoutOwned {
+        use std::mem;
+
+        VertexBufferLayoutOwned {
+            array_stride: mem::size_of::<SpriteInstanceLayout>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: vec![
+                // position
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 3]>() as _,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                // rotation quaternion
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 6]>() as _,
+                    shader_location: 7,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                // color
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 10]>() as _,
+                    shader_location: 8,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 13]>() as _,
+                    shader_location: 9,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
         }
     }
 }
@@ -198,10 +259,9 @@ pub trait RawInstance: bytemuck::Pod + bytemuck::Zeroable {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DefaultInstanceLayout {
     pub position: [f32; 3],
-    pub scale: f32,
+    pub scale: [f32; 3],
     pub rotation: [f32; 4], // quaternion
     pub color: [f32; 3],
-    _pad: f32, // alignment (important!)
 }
 
 impl RawInstance for DefaultInstanceLayout {
@@ -212,22 +272,27 @@ impl RawInstance for DefaultInstanceLayout {
             array_stride: mem::size_of::<DefaultInstanceLayout>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: vec![
-                // position + scale
+                // position
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 5,
-                    format: wgpu::VertexFormat::Float32x4,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 3]>() as _,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32x3,
                 },
                 // rotation quaternion
                 wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 4]>() as _,
-                    shader_location: 6,
+                    offset: mem::size_of::<[f32; 6]>() as _,
+                    shader_location: 7,
                     format: wgpu::VertexFormat::Float32x4,
                 },
                 // color
                 wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 8]>() as _,
-                    shader_location: 7,
+                    offset: mem::size_of::<[f32; 10]>() as _,
+                    shader_location: 8,
                     format: wgpu::VertexFormat::Float32x3,
                 },
             ],
@@ -237,10 +302,9 @@ impl RawInstance for DefaultInstanceLayout {
     fn to_raw(instance: &Instance) -> Self {
         DefaultInstanceLayout {
             position: instance.transform.position.into(),
-            scale: instance.transform.scale,
+            scale: instance.transform.scale.into(),
             rotation: instance.transform.rotation.into(), // must be quaternion
             color: instance.color.into(),
-            _pad: 0.0,
         }
     }
 }
@@ -314,26 +378,34 @@ impl RawInstance for InstanceRaw {
 
     fn to_raw(instance: &Instance) -> Self {
         let s = instance.transform.scale;
-        let rotation: [[f32; 3]; 3] = cgmath::Matrix3::from(instance.transform.rotation).into();
+        let rotation = Matrix3::from(instance.transform.rotation);
+        let model = Matrix4::from_translation(instance.transform.position)
+            * Matrix4::from(instance.transform.rotation)
+            * Matrix4::from_nonuniform_scale(s.x, s.y, s.z);
+        let safe_scale = Vector3::new(nonzero_scale(s.x), nonzero_scale(s.y), nonzero_scale(s.z));
+        let normal = Matrix3::from_cols(
+            rotation.x / safe_scale.x,
+            rotation.y / safe_scale.y,
+            rotation.z / safe_scale.z,
+        );
 
-        // Compute R * S (scale each column of rotation)
-        let mut model = [[0.0; 4]; 4];
-        for i in 0..3 {
-            model[0][i] = rotation[0][i] * s;
-            model[1][i] = rotation[1][i] * s;
-            model[2][i] = rotation[2][i] * s;
-        }
-
-        // Now apply translation (T * R * S)
-        model[3][0] = instance.transform.position.x;
-        model[3][1] = instance.transform.position.y;
-        model[3][2] = instance.transform.position.z;
-        model[3][3] = 1.0;
         InstanceRaw {
-            model,
+            model: model.into(),
             color: instance.color.into(),
-            normal: cgmath::Matrix3::from(instance.transform.rotation).into(),
+            normal: normal.into(),
         }
+    }
+}
+
+fn nonzero_scale(scale: f32) -> f32 {
+    const EPSILON: f32 = 0.000001;
+
+    if scale.abs() >= EPSILON {
+        scale
+    } else if scale.is_sign_negative() {
+        -EPSILON
+    } else {
+        EPSILON
     }
 }
 
@@ -353,7 +425,7 @@ impl InstanceTemplate {
     pub fn get_instances(
         &self,
         origin: Vector3<f32>,
-        scale: f32,
+        scale: Vector3<f32>,
         rotation: Quaternion<f32>,
     ) -> Vec<Instance> {
         let positions: Vec<Vector3<f32>> = match self {
@@ -476,6 +548,7 @@ impl InstanceTemplate {
                     should_render: true,
                     color,
                     size,
+                    uv: [0.0, 0.0, 0.0, 0.0].into(),
                 }
             })
             .collect()
@@ -488,7 +561,7 @@ pub struct InstanceBuilder<'a, T: RawInstance> {
     pub(crate) template: Option<InstanceTemplate>,
     pub(crate) phantom_data: PhantomData<T>,
     pub(crate) instances: Vec<Instance>,
-    pub(crate) global_size: f32,
+    pub(crate) global_scale: Vector3<f32>,
     pub(crate) rotation: Quaternion<f32>,
 }
 
@@ -506,8 +579,13 @@ impl<'a, T: RawInstance> InstanceBuilder<'a, T> {
         self.origin = origin;
         self
     }
-    pub fn scale(mut self, scale: f32) -> Self {
-        self.global_size = scale;
+    pub fn scale(mut self, scale: Vector3<f32>) -> Self {
+        self.global_scale = scale;
+        self
+    }
+
+    pub fn uniform_scale(mut self, scale: f32) -> Self {
+        self.global_scale = Vector3::new(scale, scale, scale);
         self
     }
 
@@ -518,12 +596,16 @@ impl<'a, T: RawInstance> InstanceBuilder<'a, T> {
 
     pub fn build(self) -> InstanceControllerHandle {
         let instances = if let Some(template) = self.template {
-            template.get_instances(self.origin, self.global_size, self.rotation)
+            template.get_instances(self.origin, self.global_scale, self.rotation)
         } else {
             if !self.instances.is_empty() {
                 self.instances
             } else {
-                InstanceTemplate::Single.get_instances(self.origin, self.global_size, self.rotation)
+                InstanceTemplate::Single.get_instances(
+                    self.origin,
+                    self.global_scale,
+                    self.rotation,
+                )
             }
         };
         let mut raw = Vec::with_capacity(instances.len());
@@ -558,5 +640,70 @@ impl<'a, T: RawInstance> InstanceBuilder<'a, T> {
             .gpu_objects
             .instance_controllers
             .insert(Box::new(ic))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cgmath::Vector3;
+
+    use super::{DefaultInstanceLayout, Instance, InstanceRaw, RawInstance, SpriteInstanceLayout};
+
+    #[test]
+    fn default_instance_layout_matches_shader_contract() {
+        let layout = DefaultInstanceLayout::layout();
+
+        assert_eq!(std::mem::size_of::<DefaultInstanceLayout>(), 52);
+        assert_eq!(layout.array_stride, 52);
+        assert_eq!(
+            layout
+                .attributes
+                .iter()
+                .map(|attribute| (attribute.shader_location, attribute.offset))
+                .collect::<Vec<_>>(),
+            vec![(5, 0), (6, 12), (7, 24), (8, 40)]
+        );
+    }
+
+    #[test]
+    fn sprite_instance_layout_includes_uv_rect() {
+        let layout = SpriteInstanceLayout::layout();
+
+        assert_eq!(std::mem::size_of::<SpriteInstanceLayout>(), 68);
+        assert_eq!(layout.array_stride, 68);
+        assert_eq!(
+            layout
+                .attributes
+                .iter()
+                .map(|attribute| {
+                    (
+                        attribute.shader_location,
+                        attribute.offset,
+                        attribute.format,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (5, 0, wgpu::VertexFormat::Float32x3),
+                (6, 12, wgpu::VertexFormat::Float32x3),
+                (7, 24, wgpu::VertexFormat::Float32x4),
+                (8, 40, wgpu::VertexFormat::Float32x3),
+                (9, 52, wgpu::VertexFormat::Float32x4),
+            ]
+        );
+    }
+
+    #[test]
+    fn raw_instance_uses_nonuniform_scale_for_model_and_normals() {
+        let instance = Instance::new(Vector3::new(3.0, 4.0, 5.0), Vector3::new(2.0, 4.0, 0.5));
+        let raw = InstanceRaw::to_raw(&instance);
+
+        assert_eq!(raw.model[0], [2.0, 0.0, 0.0, 0.0]);
+        assert_eq!(raw.model[1], [0.0, 4.0, 0.0, 0.0]);
+        assert_eq!(raw.model[2], [0.0, 0.0, 0.5, 0.0]);
+        assert_eq!(raw.model[3], [3.0, 4.0, 5.0, 1.0]);
+        assert_eq!(raw.normal[0], [0.5, 0.0, 0.0]);
+        assert_eq!(raw.normal[1], [0.0, 0.25, 0.0]);
+        assert_eq!(raw.normal[2], [0.0, 0.0, 2.0]);
     }
 }

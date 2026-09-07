@@ -1275,21 +1275,17 @@ struct TextureParameters {
     values: [f32; 4],
 }
 
-fn finish_texture(gfx: &Graphics, label: &str, textures: Vec<TextureDefinition>) -> Texture {
+fn finish_texture(
+    gfx: &Graphics,
+    label: &str,
+    textures: Vec<TextureDefinition>,
+    sampler_descriptor: &wgpu::SamplerDescriptor,
+) -> Texture {
     let radiance_scale = textures
         .first()
         .map(|texture| texture.radiance_scale)
         .unwrap_or(1.0);
-    let sampler = gfx.get_device().create_sampler(&wgpu::SamplerDescriptor {
-        address_mode_u: wgpu::AddressMode::ClampToEdge,
-        address_mode_v: wgpu::AddressMode::ClampToEdge,
-        address_mode_w: wgpu::AddressMode::ClampToEdge,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::MipmapFilterMode::Linear,
-        anisotropy_clamp: 8,
-        ..Default::default()
-    });
+    let sampler = gfx.get_device().create_sampler(sampler_descriptor);
     let radiance_scale_buffer = Buffer::new_init(
         &[TextureParameters {
             values: [radiance_scale, 0.0, 0.0, 0.0],
@@ -1318,6 +1314,7 @@ pub struct TextureBuilder<'a> {
     pub(crate) gfx: &'a mut Graphics,
     pub(crate) textures: Vec<TextureDefinition>,
     pub(crate) label: &'a str,
+    pub(crate) linear: bool,
 }
 
 impl<'a> TextureBuilder<'a> {
@@ -1326,6 +1323,7 @@ impl<'a> TextureBuilder<'a> {
             gfx,
             textures: Vec::new(),
             label,
+            linear: false,
         }
     }
 
@@ -1370,8 +1368,37 @@ impl<'a> TextureBuilder<'a> {
         self
     }
 
+    pub fn linear(mut self) -> Self {
+        self.linear = true;
+        self
+    }
+
     pub fn build(self) -> Texture {
-        finish_texture(self.gfx, self.label, self.textures)
+        let sampler_descripton = if self.linear {
+            &wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+                anisotropy_clamp: 1,
+                ..Default::default()
+            }
+        } else {
+            &wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Linear,
+                anisotropy_clamp: 8,
+                ..Default::default()
+            }
+        };
+
+        finish_texture(self.gfx, self.label, self.textures, sampler_descripton)
     }
 
     pub fn cubemap(self, image: &[u8]) -> Texture {
@@ -1401,7 +1428,18 @@ impl<'a> TextureBuilder<'a> {
             wgpu::TextureFormat::Rgba8UnormSrgb,
         )
         .unwrap();
-        finish_texture(self.gfx, self.label, vec![cubemap])
+        let sampler_description = &wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 8,
+            ..Default::default()
+        };
+
+        finish_texture(self.gfx, self.label, vec![cubemap], sampler_description)
     }
 
     /// Decodes a 2:1 Radiance HDR image, uploads it, and renders a floating-point
@@ -1425,7 +1463,18 @@ impl<'a> TextureBuilder<'a> {
             Some(self.label),
         )
         .expect("Failed to render HDR environment cubemap");
-        finish_texture(self.gfx, self.label, vec![cubemap])
+        let sampler_description = &wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 8,
+            ..Default::default()
+        };
+
+        finish_texture(self.gfx, self.label, vec![cubemap], sampler_description)
     }
 
     /// Renders a diffuse irradiance cubemap from an existing environment cubemap.
@@ -1448,7 +1497,18 @@ impl<'a> TextureBuilder<'a> {
         )
         .expect("Failed to render irradiance cubemap");
 
-        finish_texture(self.gfx, self.label, vec![irradiance])
+        let sampler_description = &wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 8,
+            ..Default::default()
+        };
+
+        finish_texture(self.gfx, self.label, vec![irradiance], sampler_description)
     }
 
     /// Builds the complete image-based lighting texture set used by the PBR
@@ -1500,10 +1560,22 @@ impl<'a> TextureBuilder<'a> {
         let brdf_lut = render_brdf_lut(render_context, brdf_lut_size, Some(self.label))
             .expect("Failed to render BRDF integration lookup table");
 
+        let sampler_description = &wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 8,
+            ..Default::default()
+        };
+
         finish_texture(
             self.gfx,
             self.label,
             vec![irradiance, prefiltered_environment, brdf_lut],
+            sampler_description,
         )
     }
 
@@ -1536,7 +1608,18 @@ impl<'a> TextureBuilder<'a> {
             Some(self.label),
         )
         .expect("Failed to render irradiance cubemap");
-        finish_texture(self.gfx, self.label, vec![irradiance])
+        let sampler_description = &wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 8,
+            ..Default::default()
+        };
+
+        finish_texture(self.gfx, self.label, vec![irradiance], sampler_description)
     }
 }
 
@@ -1826,8 +1909,18 @@ impl<'a> PbrTextureBuilder<'a> {
             roughness,
             ao,
         );
+        let sampler_description = &wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 8,
+            ..Default::default()
+        };
 
-        finish_texture(gfx, label, textures)
+        finish_texture(gfx, label, textures, sampler_description)
     }
 }
 

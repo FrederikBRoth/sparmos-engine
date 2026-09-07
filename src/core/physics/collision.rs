@@ -109,32 +109,29 @@ pub enum Collider {
 }
 
 impl Collider {
-    /// Bounds for axis-aligned instances with uniform scale.
+    /// Bounds for axis-aligned instances.
     pub(crate) fn aabb(&self, transform: &Transform) -> Aabb {
-        let magnitude = transform.scale.abs();
+        let scale = transform.scale;
+        let magnitude = abs_scale(scale);
         match self {
             Collider::Box { extents } => {
-                let world_extents = *extents * magnitude;
-                // Mirroring a corner-relative mesh moves its minimum corner.
-                let min = if transform.scale < 0.0 {
-                    transform.position - world_extents
-                } else {
-                    transform.position
-                };
-                Aabb::from_box(min, world_extents)
+                let signed_extents = component_mul(*extents, scale);
+                let local_min = component_min(signed_extents, Vector3::new(0.0, 0.0, 0.0));
+                let local_max = component_max(signed_extents, Vector3::new(0.0, 0.0, 0.0));
+                Aabb::from_box(transform.position + local_min, local_max - local_min)
             }
             Collider::Sphere { radius } => {
-                Aabb::from_sphere(transform.position, *radius * magnitude)
+                Aabb::from_sphere(transform.position, *radius * max_component(magnitude))
             }
             Collider::Capsule {
                 radius,
                 half_height,
             } => Aabb::from_capsule(
                 transform.position,
-                *radius * magnitude,
-                *half_height * magnitude,
+                *radius * magnitude.x.max(magnitude.z),
+                *half_height * magnitude.y,
             ),
-            Collider::Plane => Aabb::from_plane(transform.position, transform.scale),
+            Collider::Plane => Aabb::from_plane(transform),
         }
     }
 
@@ -144,7 +141,7 @@ impl Collider {
             Collider::Sphere { radius } => ray_sphere(
                 ray,
                 Point3::from_vec(transform.position),
-                *radius * transform.scale.abs(),
+                *radius * max_component(abs_scale(transform.scale)),
             ),
             Collider::Capsule { .. } => todo!(),
             Collider::Plane => ray_plane(ray, transform),
@@ -207,8 +204,8 @@ fn sphere_sphere_collision(
     {
         let ab = bt.position - at.position;
 
-        let a_radius = (radius_a * at.scale).abs();
-        let b_radius = (radius_b * bt.scale).abs();
+        let a_radius = radius_a * max_component(abs_scale(at.scale));
+        let b_radius = radius_b * max_component(abs_scale(bt.scale));
 
         let distance = ab.magnitude();
 
@@ -244,7 +241,7 @@ fn sphere_plane_collision(
     if let Collider::Sphere { radius: radius_a } = a
         && let Collider::Plane = b
     {
-        let a_radius = (radius_a * at.scale).abs();
+        let a_radius = radius_a * max_component(abs_scale(at.scale));
 
         let plane_normal = bt.rotation.rotate_vector(Vector3::unit_y()).normalize();
 
@@ -302,13 +299,35 @@ impl Aabb {
         }
     }
 
-    pub fn from_plane(position: Vector3<f32>, size: f32) -> Aabb {
-        let half = size * 0.5;
-        let thickness = 0.001;
+    pub fn from_plane(transform: &Transform) -> Aabb {
+        let half_x = transform.scale.x * 0.5;
+        let half_z = transform.scale.z * 0.5;
+        let corners = [
+            Vector3::new(-half_x, 0.0, -half_z),
+            Vector3::new(half_x, 0.0, -half_z),
+            Vector3::new(-half_x, 0.0, half_z),
+            Vector3::new(half_x, 0.0, half_z),
+        ];
+
+        let first = transform.position + transform.rotation.rotate_vector(corners[0]);
+        let mut min = first;
+        let mut max = first;
+        for corner in corners.into_iter().skip(1) {
+            let world_corner = transform.position + transform.rotation.rotate_vector(corner);
+            min = component_min(min, world_corner);
+            max = component_max(max, world_corner);
+        }
+
+        let thickness = abs_scale(
+            transform
+                .rotation
+                .rotate_vector(Vector3::unit_y())
+                .normalize(),
+        ) * 0.001;
 
         Self {
-            min: cgmath::Vector3::new(position.x - half, position.y - thickness, position.z - half),
-            max: cgmath::Vector3::new(position.x + half, position.y + thickness, position.z + half),
+            min: min - thickness,
+            max: max + thickness,
         }
     }
 
@@ -320,6 +339,26 @@ impl Aabb {
             && a.min.z <= b.max.z
             && a.max.z >= b.min.z
     }
+}
+
+fn abs_scale(scale: Vector3<f32>) -> Vector3<f32> {
+    Vector3::new(scale.x.abs(), scale.y.abs(), scale.z.abs())
+}
+
+fn max_component(value: Vector3<f32>) -> f32 {
+    value.x.max(value.y).max(value.z)
+}
+
+fn component_mul(a: Vector3<f32>, b: Vector3<f32>) -> Vector3<f32> {
+    Vector3::new(a.x * b.x, a.y * b.y, a.z * b.z)
+}
+
+fn component_min(a: Vector3<f32>, b: Vector3<f32>) -> Vector3<f32> {
+    Vector3::new(a.x.min(b.x), a.y.min(b.y), a.z.min(b.z))
+}
+
+fn component_max(a: Vector3<f32>, b: Vector3<f32>) -> Vector3<f32> {
+    Vector3::new(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z))
 }
 
 pub struct Ray {
@@ -515,4 +554,66 @@ fn ray_plane(ray: &Ray, transform: &Transform) -> Option<f32> {
         .normalize();
     println!("{:?}", plane_normal);
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use cgmath::{Deg, Quaternion, Rotation3, Vector3};
+
+    use super::Collider;
+    use crate::core::instance::Transform;
+
+    #[test]
+    fn box_aabb_handles_nonuniform_and_negative_scale_per_axis() {
+        let collider = Collider::Box {
+            extents: Vector3::new(2.0, 3.0, 4.0),
+        };
+        let transform = Transform {
+            position: Vector3::new(10.0, 20.0, 30.0),
+            scale: Vector3::new(-2.0, 0.5, -0.25),
+            ..Default::default()
+        };
+
+        let aabb = collider.aabb(&transform);
+        assert_eq!(aabb.min, Vector3::new(6.0, 20.0, 29.0));
+        assert_eq!(aabb.max, Vector3::new(10.0, 21.5, 30.0));
+    }
+
+    #[test]
+    fn sphere_and_capsule_aabbs_use_conservative_axis_scales() {
+        let transform = Transform {
+            position: Vector3::new(1.0, 2.0, 3.0),
+            scale: Vector3::new(2.0, 3.0, 4.0),
+            ..Default::default()
+        };
+
+        let sphere = Collider::Sphere { radius: 2.0 }.aabb(&transform);
+        assert_eq!(sphere.min, Vector3::new(-7.0, -6.0, -5.0));
+        assert_eq!(sphere.max, Vector3::new(9.0, 10.0, 11.0));
+
+        let capsule = Collider::Capsule {
+            radius: 2.0,
+            half_height: 5.0,
+        }
+        .aabb(&transform);
+        assert_eq!(capsule.min, Vector3::new(-7.0, -21.0, -5.0));
+        assert_eq!(capsule.max, Vector3::new(9.0, 25.0, 11.0));
+    }
+
+    #[test]
+    fn plane_aabb_rotates_scaled_xz_corners() {
+        let transform = Transform {
+            position: Vector3::new(1.0, 2.0, 3.0),
+            rotation: Quaternion::from_angle_x(Deg(90.0)),
+            scale: Vector3::new(4.0, 1.0, 2.0),
+        };
+
+        let aabb = Collider::Plane.aabb(&transform);
+        assert!((aabb.min.x - -1.0).abs() < 0.00001);
+        assert!((aabb.max.x - 3.0).abs() < 0.00001);
+        assert!((aabb.min.y - 1.0).abs() < 0.00001);
+        assert!((aabb.max.y - 3.0).abs() < 0.00001);
+        assert!((aabb.min.z - 2.999).abs() < 0.00001);
+        assert!((aabb.max.z - 3.001).abs() < 0.00001);
+    }
 }

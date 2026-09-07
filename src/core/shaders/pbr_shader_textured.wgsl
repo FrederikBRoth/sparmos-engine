@@ -63,9 +63,10 @@ struct VertexInput {
 }
 
 struct InstanceInput {
-    @location(5) pos_scale: vec4<f32>,
-    @location(6) rotation: vec4<f32>,
-    @location(7) color: vec3<f32>,
+    @location(5) position: vec3<f32>,
+    @location(6) scale: vec3<f32>,
+    @location(7) rotation: vec4<f32>,
+    @location(8) color: vec3<f32>,
 }
 
 struct VertexOutput {
@@ -81,16 +82,22 @@ fn vs_main(
     model: VertexInput,
     instance: InstanceInput,
 ) -> VertexOutput {
-    let position = instance.pos_scale.xyz;
-    let scale = instance.pos_scale.w;
+    let position = instance.position;
+    let scale = instance.scale;
+    let scale_sign = select(
+        vec3<f32>(-1.0),
+        vec3<f32>(1.0),
+        scale >= vec3<f32>(0.0),
+    );
+    let safe_scale = scale_sign * max(abs(scale), vec3<f32>(0.000001));
 
     let rot = quat_to_mat3(instance.rotation);
 
     // Apply scale
     let rot_scaled = mat3x3<f32>(
-        rot[0] * scale,
-        rot[1] * scale,
-        rot[2] * scale,
+        rot[0] * scale.x,
+        rot[1] * scale.y,
+        rot[2] * scale.z,
     );
 
     // Build full model matrix
@@ -103,8 +110,7 @@ fn vs_main(
 
     let world_pos = model_matrix * vec4<f32>(model.position, 1.0);
 
-    // Normal matrix = rotation only
-    let normal = normalize(rot * model.normal);
+    let normal = normalize(rot * (model.normal / safe_scale));
 
     var out: VertexOutput;
     let view_proj = camera.proj * camera.view;
