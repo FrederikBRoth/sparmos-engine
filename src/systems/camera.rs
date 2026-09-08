@@ -1,5 +1,3 @@
-use std::cell::Ref;
-
 use cgmath::{
     EuclideanSpace, InnerSpace, Point3, Quaternion, Rad, Rotation, Rotation3, SquareMatrix,
     Vector3, Vector4,
@@ -25,8 +23,8 @@ use crate::{
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
     0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.5,
-    0.0, 0.0, 0.0, 1.0,
+    0.0, 0.0, 0.5, 0.0,
+    0.0, 0.0, 0.5, 1.0,
 );
 
 pub struct CameraAnimator {
@@ -124,6 +122,19 @@ pub enum CameraMode {
     Fixed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CameraProjection {
+    Perspective,
+    OrthographicWorld { vertical_size: f32 },
+    ScreenSpace,
+}
+
+impl Default for CameraProjection {
+    fn default() -> Self {
+        Self::Perspective
+    }
+}
+
 pub struct Camera {
     pub eye: cgmath::Point3<f32>,
     pub target: cgmath::Point3<f32>,
@@ -137,6 +148,7 @@ pub struct Camera {
     pub pitch: f32,
     pub forward: Vector3<f32>,
     pub camera_mode: CameraMode,
+    pub projection: CameraProjection,
 
     pub auto: bool,
     pub speed: f32,
@@ -170,11 +182,16 @@ impl Camera {
             yaw: 90.0,
             pitch: 0.0,
             screen_size,
-            aspect: screen_size.width / screen_size.height,
+            aspect: if screen_size.height > 0.0 {
+                screen_size.width / screen_size.height
+            } else {
+                1.0
+            },
             fovy: 90.0,
             znear: 0.1,
             zfar: 5000.0,
             camera_mode: CameraMode::Free,
+            projection: CameraProjection::Perspective,
             is_up_pressed: MovementPress::NotPressed,
             is_down_pressed: MovementPress::NotPressed,
             is_forward_pressed: MovementPress::NotPressed,
@@ -199,6 +216,18 @@ impl Camera {
     }
 
     fn build_view_matrix(&self) -> cgmath::Matrix4<f32> {
+        match self.projection {
+            CameraProjection::ScreenSpace => return cgmath::Matrix4::identity(),
+            CameraProjection::OrthographicWorld { .. } => {
+                return cgmath::Matrix4::look_at_rh(
+                    self.eye,
+                    self.eye + Vector3::unit_z(),
+                    Vector3::unit_y(),
+                );
+            }
+            CameraProjection::Perspective => {}
+        }
+
         match self.camera_mode {
             CameraMode::Free => {
                 cgmath::Matrix4::look_at_rh(self.eye, self.eye + self.forward, self.up)
@@ -211,15 +240,40 @@ impl Camera {
     }
 
     fn build_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        // cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar)
-        cgmath::ortho(
-            0.0,
-            self.screen_size.width,
-            self.screen_size.height,
-            0.0,
-            0.0,
-            1.0,
-        )
+        match self.projection {
+            CameraProjection::Perspective => {
+                cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar)
+            }
+            CameraProjection::OrthographicWorld { vertical_size } => {
+                let half_height = vertical_size * 0.5;
+                let half_width = half_height * self.aspect;
+                cgmath::ortho(
+                    -half_width,
+                    half_width,
+                    -half_height,
+                    half_height,
+                    self.znear,
+                    self.zfar,
+                )
+            }
+            CameraProjection::ScreenSpace => cgmath::ortho(
+                0.0,
+                self.screen_size.width,
+                self.screen_size.height,
+                0.0,
+                0.0,
+                1.0,
+            ),
+        }
+    }
+
+    pub fn resize(&mut self, screen_size: PhysicalSize<f32>) {
+        self.screen_size = screen_size;
+        self.aspect = if screen_size.height > 0.0 {
+            screen_size.width / screen_size.height
+        } else {
+            1.0
+        };
     }
     /// Construct a picking ray using the post-processing display-to-render scale.
     /// Pass 1.0 when rendering directly to the display.
@@ -232,17 +286,7 @@ impl Camera {
         display_to_render_ndc_scale: f32,
     ) -> (Point3<f32>, Vector3<f32>) {
         // Convert screen coords to normalized device coordinates (NDC)
-        let front = self
-            .project_screen_to_world(
-                mouse_x,
-                mouse_y,
-                1.0,
-                screen_width,
-                screen_height,
-                display_to_render_ndc_scale,
-            )
-            .unwrap();
-        let back = self
+        let near = self
             .project_screen_to_world(
                 mouse_x,
                 mouse_y,
@@ -252,10 +296,18 @@ impl Camera {
                 display_to_render_ndc_scale,
             )
             .unwrap();
+        let far = self
+            .project_screen_to_world(
+                mouse_x,
+                mouse_y,
+                1.0,
+                screen_width,
+                screen_height,
+                display_to_render_ndc_scale,
+            )
+            .unwrap();
 
-        let test = (Point3::from_vec(back), -(front - back).normalize());
-        // println!("{:?}", test);
-        test
+        (Point3::from_vec(near), (far - near).normalize())
     }
 
     pub fn project_screen_to_world(
@@ -274,7 +326,7 @@ impl Camera {
             let world = Vector4::new(
                 raw_ndc_x * display_to_render_ndc_scale,
                 raw_ndc_y * display_to_render_ndc_scale,
-                mouse_z * 2.0 - 1.0,
+                mouse_z,
                 1.0,
             );
             let world = inv_view_projection * world;
@@ -380,12 +432,25 @@ impl Camera {
     }
 
     pub fn process_mouse(&mut self, delta_x: f32, delta_y: f32, camera: &mut Camera) {
+        if !matches!(camera.projection, CameraProjection::Perspective) {
+            return;
+        }
+
         camera.yaw += delta_x * self.sensitivity;
         camera.pitch = (camera.pitch + delta_y * self.sensitivity).clamp(-89.0, 89.0);
         camera.update_forward();
     }
 
     pub fn update_camera(&mut self, dt: std::time::Duration) {
+        match self.projection {
+            CameraProjection::ScreenSpace => return,
+            CameraProjection::OrthographicWorld { .. } => {
+                self.update_orthographic_pan(dt.as_secs_f32());
+                return;
+            }
+            CameraProjection::Perspective => {}
+        }
+
         let right: Vector3<f32> = self.forward.cross(self.up).normalize();
 
         if self.is_forward_pressed.is_pressed() {
@@ -458,6 +523,30 @@ impl Camera {
         // }
     }
 
+    fn update_orthographic_pan(&mut self, dt: f32) {
+        let forward = Vector3::unit_z();
+        let right = forward.cross(Vector3::unit_y()).normalize();
+        let up = Vector3::unit_y();
+        let movement = self.speed * dt;
+        let mut offset = Vector3::new(0.0, 0.0, 0.0);
+
+        if self.is_forward_pressed.is_pressed() || self.is_up_pressed.is_pressed() {
+            offset += up * movement;
+        }
+        if self.is_backward_pressed.is_pressed() || self.is_down_pressed.is_pressed() {
+            offset -= up * movement;
+        }
+        if self.is_right_pressed.is_pressed() {
+            offset += right * movement;
+        }
+        if self.is_left_pressed.is_pressed() {
+            offset -= right * movement;
+        }
+
+        self.eye += offset;
+        self.target += offset;
+    }
+
     fn reset_input(&mut self) {
         reset_if_not_override(&mut self.is_up_pressed);
         reset_if_not_override(&mut self.is_down_pressed);
@@ -494,6 +583,7 @@ pub struct CameraUniform {
     view_position: [f32; 4],
     proj: [[f32; 4]; 4],
     view: [[f32; 4]; 4],
+    screen: [f32; 4],
 }
 
 impl CameraUniform {
@@ -503,13 +593,20 @@ impl CameraUniform {
             proj: cgmath::Matrix4::identity().into(),
 
             view: cgmath::Matrix4::identity().into(),
+            screen: [0.0; 4],
         }
     }
 
-    pub fn update_view_proj(&mut self, camera: &Camera) {
+    pub fn update_view_proj(&mut self, camera: &Camera, display_to_render_ndc_scale: f32) {
         self.view_position = camera.eye.to_homogeneous().into();
         self.view = camera.build_view_matrix().into();
         self.proj = (OPENGL_TO_WGPU_MATRIX * camera.build_projection_matrix()).into();
+        self.screen = [
+            camera.screen_size.width,
+            camera.screen_size.height,
+            display_to_render_ndc_scale,
+            0.0,
+        ];
     }
 }
 
@@ -527,7 +624,11 @@ pub struct CameraSystem {
 impl CameraSystem {
     pub fn new(gfx: &mut Graphics, camera: &Camera) -> Self {
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(camera);
+        let display_to_render_ndc_scale = gfx
+            .get_render_context()
+            .post_processing
+            .display_to_render_ndc_scale();
+        camera_uniform.update_view_proj(camera, display_to_render_ndc_scale);
         let camera_buffer = Buffer::new_init(
             &[camera_uniform],
             gfx.get_device_mut(),
@@ -542,7 +643,9 @@ impl CameraSystem {
     }
 
     pub fn update_camera(&mut self, camera: &Camera, rc: &mut RenderContext) {
-        self.camera_uniform.update_view_proj(camera);
+        let display_to_render_ndc_scale = rc.post_processing.display_to_render_ndc_scale();
+        self.camera_uniform
+            .update_view_proj(camera, display_to_render_ndc_scale);
         rc.queue.write_buffer(
             &self.camera_buffer.buffer,
             0,
@@ -582,8 +685,8 @@ impl GpuBindableSystem for CameraSystem {
     fn run(&mut self, world: &mut World, rc: &mut RenderContext, dt: std::time::Duration) {
         world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
             camera.update_camera(dt);
-            self.update_camera(camera, rc);
             camera_animator.update(dt.as_secs_f32(), camera);
+            self.update_camera(camera, rc);
         });
     }
 
@@ -602,8 +705,8 @@ impl GpuBindableSystem for CameraSystem {
         dt: std::time::Duration,
         size: PhysicalSize<f32>,
     ) {
-        world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
-            camera.screen_size = size;
+        world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, _camera_animator)| {
+            camera.resize(size);
             camera.update_camera(dt);
             self.update_camera(camera, resources);
         });

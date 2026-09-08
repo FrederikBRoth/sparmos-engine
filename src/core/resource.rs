@@ -9,7 +9,6 @@ new_key_type! {pub struct SpriteSheetHandle; }
 pub struct Resources {
     pub buffers: SlotMap<BufferHandle, Buffer>,
     pub named_buffers: HashMap<String, BufferHandle>,
-
     pub sprite_sheets: SlotMap<SpriteSheetHandle, SpriteSheet>,
 }
 
