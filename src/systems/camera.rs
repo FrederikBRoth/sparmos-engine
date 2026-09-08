@@ -119,14 +119,16 @@ impl CameraAnimator {
     }
 }
 pub enum CameraMode {
-    FreeMode,
-    AnimatedMode,
+    Free,
+    Animated,
+    Fixed,
 }
 
 pub struct Camera {
     pub eye: cgmath::Point3<f32>,
     pub target: cgmath::Point3<f32>,
     pub up: cgmath::Vector3<f32>,
+    pub screen_size: PhysicalSize<f32>,
     pub aspect: f32,
     pub fovy: f32,
     pub znear: f32,
@@ -167,11 +169,12 @@ impl Camera {
             forward: Vector3::unit_z(),
             yaw: 90.0,
             pitch: 0.0,
+            screen_size,
             aspect: screen_size.width / screen_size.height,
             fovy: 90.0,
             znear: 0.1,
             zfar: 5000.0,
-            camera_mode: CameraMode::FreeMode,
+            camera_mode: CameraMode::Free,
             is_up_pressed: MovementPress::NotPressed,
             is_down_pressed: MovementPress::NotPressed,
             is_forward_pressed: MovementPress::NotPressed,
@@ -197,16 +200,26 @@ impl Camera {
 
     fn build_view_matrix(&self) -> cgmath::Matrix4<f32> {
         match self.camera_mode {
-            CameraMode::FreeMode => {
+            CameraMode::Free => {
                 cgmath::Matrix4::look_at_rh(self.eye, self.eye + self.forward, self.up)
             }
 
-            CameraMode::AnimatedMode => cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up),
+            CameraMode::Fixed | CameraMode::Animated => {
+                cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up)
+            }
         }
     }
 
     fn build_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar)
+        // cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar)
+        cgmath::ortho(
+            0.0,
+            self.screen_size.width,
+            self.screen_size.height,
+            0.0,
+            0.0,
+            1.0,
+        )
     }
     /// Construct a picking ray using the post-processing display-to-render scale.
     /// Pass 1.0 when rendering directly to the display.
@@ -294,7 +307,7 @@ impl Camera {
     }
 
     pub fn process_events(&mut self, event: &WindowEvent) -> bool {
-        if let CameraMode::AnimatedMode = self.camera_mode {
+        if let CameraMode::Animated = self.camera_mode {
             self.reset_input();
             return false;
         }
@@ -580,6 +593,20 @@ impl GpuBindableSystem for CameraSystem {
 
     fn binding_location(&self) -> (u32, u32) {
         (0, 0)
+    }
+
+    fn update(
+        &mut self,
+        world: &mut World,
+        resources: &mut RenderContext,
+        dt: std::time::Duration,
+        size: PhysicalSize<f32>,
+    ) {
+        world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
+            camera.screen_size = size;
+            camera.update_camera(dt);
+            self.update_camera(camera, resources);
+        });
     }
     // fn register(self, resources: &mut crate::core::resource::Resources) {
     //     let type_id = TypeId::of::<Self>();

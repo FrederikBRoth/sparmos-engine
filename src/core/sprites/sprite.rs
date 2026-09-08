@@ -21,7 +21,6 @@ impl Sprite {
         material: MaterialHandle,
         position: Vector3<f32>,
     ) -> RenderableHandle {
-        //TODO: should not recreate meshes every time
         let sprite_sheet = &gfx.engine.resources.sprite_sheets[sprite_sheet];
         let sprite_frame = sprite_sheet
             .frames

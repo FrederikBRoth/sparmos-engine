@@ -3,6 +3,7 @@ use std::{cell::RefCell, collections::HashSet, mem, rc::Rc, sync::Arc, time::Dur
 use cgmath::{Quaternion, Rotation3, Vector3};
 use hecs::{DynamicBundle, Entity, Query, QueryBorrow};
 use wgpu::{Device, Queue};
+use winit::dpi::PhysicalSize;
 
 use crate::{
     core::{
@@ -241,6 +242,16 @@ impl Graphics {
             self.engine.engine_time.dt(),
         );
     }
+
+    pub(crate) fn update_all_systems(&mut self, size: PhysicalSize<f32>) {
+        self.engine.systems.update_all(
+            &mut self.world,
+            &mut self.engine.render_context,
+            self.engine.engine_time.dt(),
+            size,
+        );
+    }
+
     pub fn get_world(&self) -> Rc<RefCell<World>> {
         Rc::clone(&self.world)
     }

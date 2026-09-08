@@ -292,6 +292,8 @@ impl State {
             );
             self.surface_configured = true;
 
+            let f_size = PhysicalSize::new(new_size.width as f32, new_size.height as f32);
+            self.graphics.update_all_systems(f_size);
             // if let Some(game_loop) = self.game_loop.as_mut() {
             //     game_loop.resize(&self.render_context.config);
             // }

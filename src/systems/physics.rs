@@ -193,6 +193,16 @@ impl DefaultSystem for PhysicsSystem {
     ) {
         self.advance(world, dt);
     }
+
+    #[allow(unused)]
+    fn update(
+        &mut self,
+        world: &mut World,
+        resources: &mut crate::core::render::RenderContext,
+        dt: std::time::Duration,
+        size: winit::dpi::PhysicalSize<f32>,
+    ) {
+    }
 }
 
 struct PhysicsCandidate {

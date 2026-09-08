@@ -91,6 +91,16 @@ impl GpuBindableSystem for LightSystem {
         (0, 1)
     }
 
+    #[allow(unused)]
+    fn update(
+        &mut self,
+        world: &mut World,
+        resources: &mut crate::core::render::RenderContext,
+        dt: std::time::Duration,
+        size: winit::dpi::PhysicalSize<f32>,
+    ) {
+    }
+
     // fn register(self, resources: &mut Resources) {
     //     let type_id = TypeId::of::<Self>();
     //

@@ -6,6 +6,8 @@ use std::{
     time::Duration,
 };
 
+use winit::dpi::PhysicalSize;
+
 use crate::{
     audio::{
         audio_handler::{AudioHandler, AudioTrigger},
@@ -49,16 +51,45 @@ impl System {
             System::Default(default_system) => default_system.run(world, resources, dt),
         }
     }
+
+    fn update(
+        &mut self,
+        world: &mut World,
+        resources: &mut RenderContext,
+        dt: Duration,
+        size: PhysicalSize<f32>,
+    ) {
+        match self {
+            System::GpuBindable(gpu_bindable_system) => {
+                gpu_bindable_system.update(world, resources, dt, size)
+            }
+            System::Default(default_system) => default_system.update(world, resources, dt, size),
+        }
+    }
 }
 
 pub trait DefaultSystem {
     fn run(&mut self, world: &mut World, resources: &mut RenderContext, dt: Duration);
+    fn update(
+        &mut self,
+        world: &mut World,
+        resources: &mut RenderContext,
+        dt: Duration,
+        size: PhysicalSize<f32>,
+    );
 }
 
 pub trait GpuBindableSystem {
     fn run(&mut self, world: &mut World, resources: &mut RenderContext, dt: Duration);
     fn get_buffer(&self) -> &Buffer;
     fn binding_location(&self) -> (u32, u32);
+    fn update(
+        &mut self,
+        world: &mut World,
+        resources: &mut RenderContext,
+        dt: Duration,
+        size: PhysicalSize<f32>,
+    );
 }
 
 impl Systems {
@@ -74,6 +105,18 @@ impl Systems {
     ) {
         for system in &mut self.systems {
             system.run(&mut world.borrow_mut(), resources, dt);
+        }
+    }
+
+    pub fn update_all(
+        &mut self,
+        world: &mut Rc<RefCell<World>>,
+        resources: &mut RenderContext,
+        dt: Duration,
+        size: PhysicalSize<f32>,
+    ) {
+        for system in &mut self.systems {
+            system.update(&mut world.borrow_mut(), resources, dt, size);
         }
     }
 
