@@ -7,7 +7,7 @@ use crate::{
     application::graphics::Graphics,
     core::{
         geometry::{DefaultVertex, Mesh, Vertex},
-        object_loading::model::Model,
+        models::model::Model,
         render::{InstanceControllerHandle, MaterialHandle, TextureHandle},
         texture::Texture,
     },

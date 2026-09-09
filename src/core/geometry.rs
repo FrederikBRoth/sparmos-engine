@@ -7,7 +7,7 @@ use wgpu::util::DeviceExt;
 use crate::{
     application::graphics::Graphics,
     core::{
-        object_loading::model::Model,
+        models::model::Model,
         render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
     },
 };

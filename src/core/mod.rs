@@ -1,10 +1,11 @@
+pub mod assets;
 pub(crate) mod binding;
 pub mod buffer;
 pub mod engine;
 pub mod entities;
 pub mod geometry;
 pub mod instance;
-pub mod object_loading;
+pub mod models;
 pub mod pbr;
 pub mod physics;
 pub mod pipelines;

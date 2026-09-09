@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     application::graphics::Graphics,
     core::{
-        object_loading::{self},
+        models::{self},
         render::{InstanceControllerHandle, MaterialHandle, MeshHandle, TextureHandle},
     },
 };
@@ -22,7 +22,7 @@ impl Model {
         material_handle: MaterialHandle,
         instance_handle: Option<InstanceControllerHandle>,
     ) -> Option<Self> {
-        object_loading::obj::load_obj(obj_data, mtl_data, gfx, material_handle, instance_handle)
+        models::obj::load_obj(obj_data, mtl_data, gfx, material_handle, instance_handle)
     }
 
     pub fn load_glb(
@@ -31,7 +31,7 @@ impl Model {
         instance_handle: InstanceControllerHandle,
         material: MaterialHandle,
     ) -> Self {
-        object_loading::gltf::load_gltf(gfx, data, instance_handle, material)
+        models::gltf::load_gltf(gfx, data, instance_handle, material)
     }
 
     pub fn materials(&self) -> &HashMap<MeshHandle, MaterialHandle> {

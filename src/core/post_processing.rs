@@ -56,6 +56,7 @@ impl PostProcessHandler {
         screen_size: PhysicalSize<u32>,
         format: TextureFormat,
         effect: Effect,
+        shader_source: &str,
     ) {
         let render_size = Self::overscan_size(screen_size);
         let render_texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -134,9 +135,7 @@ impl PostProcessHandler {
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("post_process_shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!("post_processing_shaders/chromatic_aberration.wgsl").into(),
-                ),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
             });
 
         let post_pipeline = self

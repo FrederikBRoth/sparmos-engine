@@ -10,7 +10,7 @@ use crate::{
         entities::World,
         geometry::{Mesh, MeshKey},
         instance::{Instance, InstanceControllerTrait, Transform},
-        object_loading::model::Model,
+        models::model::Model,
         pipelines::{ComputeRendering, ComputeRenderingKey, Material, MaterialKey},
         post_processing::PostProcessHandler,
         texture::{Texture, TextureDepth},

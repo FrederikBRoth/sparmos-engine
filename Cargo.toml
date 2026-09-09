@@ -51,7 +51,12 @@ features = ["png", "jpeg", "hdr"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3.4", features = ["wasm_js"] }
-web-sys = { version = "0.3", features = ["Document", "Window", "Element"] }
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Window",
+    "Element",
+    "Location",
+] }
 reqwest = { version = "0.13" }
 console_error_panic_hook = "0.1"
 console_log = "1.0"

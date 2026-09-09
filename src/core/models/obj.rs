@@ -9,7 +9,7 @@ use crate::{
     application::graphics::Graphics,
     core::{
         geometry::{DefaultVertex, Vertex},
-        object_loading::model::Model,
+        models::model::Model,
         render::{InstanceControllerHandle, MaterialHandle, MeshHandle, TextureHandle},
     },
 };
