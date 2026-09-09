@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -12,8 +13,10 @@ use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
+use crate::application::event_handler::EventRegistry;
 use crate::application::graphics::Graphics;
 use crate::application::gui::EguiRenderer;
+use crate::core::assets::asset_loader::{AssetManifest, Assets};
 use crate::core::engine::{Arguments, Engine, EngineCommandQueue, EngineTime, Systems};
 use crate::core::entities::World;
 
@@ -40,8 +43,13 @@ pub struct State {
     pub egui_renderer: EguiRenderer,
     pub backend: DeviceBackend,
     pub graphics: Graphics,
+    pub event_registry: EventRegistry,
 }
-pub trait Game {
+pub trait Game: Any {
+    fn assets(&self) -> AssetManifest {
+        AssetManifest::default()
+    }
+
     fn update(&mut self, gfx: &mut Graphics, world: Ref<'_, World>);
 
     fn process_event(
@@ -62,7 +70,7 @@ pub trait Game {
 
 impl State {
     // Creates a new State object, initializing all required resources
-    pub async fn new(window: Arc<Window>) -> State {
+    pub async fn new(window: Arc<Window>, assets: Assets) -> anyhow::Result<State> {
         let size = window.inner_size();
 
         // Create a new GPU instance
@@ -221,7 +229,7 @@ impl State {
             render_commands: Vec::new(),
             audio_handler: None,
             systems: Systems { systems: vec![] },
-            resources: Resources::new(),
+            resources: Resources::new(assets),
             audio_triggers: None,
         };
         let mut gfx = Graphics {
@@ -232,39 +240,29 @@ impl State {
         //Setup basic systems
         //Compute
 
-        gfx.shader("pbr", include_str!("../core/shaders/pbr_shader.wgsl"));
-        gfx.shader("pbr2", include_str!("../core/shaders/pbr_shader2.wgsl"));
-
-        gfx.shader(
-            "pbr_textured",
-            include_str!("../core/shaders/pbr_shader_textured.wgsl"),
-        );
-        gfx.shader("skybox", include_str!("../core/shaders/skybox.wgsl"));
-        gfx.shader(
+        gfx.shader_asset("pbr", "engine/shaders/pbr_shader.wgsl")?;
+        gfx.shader_asset("pbr2", "engine/shaders/pbr_shader2.wgsl")?;
+        gfx.shader_asset("pbr_textured", "engine/shaders/pbr_shader_textured.wgsl")?;
+        gfx.shader_asset("skybox", "engine/shaders/skybox.wgsl")?;
+        gfx.shader_asset(
             "equirectangular_to_cubemap",
-            include_str!("../core/shaders/equirectangular_to_cubemap.wgsl"),
-        );
-        gfx.shader(
+            "engine/shaders/equirectangular_to_cubemap.wgsl",
+        )?;
+        gfx.shader_asset(
             "irradiance_convolution",
-            include_str!("../core/shaders/irradiance_convolution.wgsl"),
-        );
-        gfx.shader(
+            "engine/shaders/irradiance_convolution.wgsl",
+        )?;
+        gfx.shader_asset(
             "prefilter_environment",
-            include_str!("../core/shaders/prefilter_environment.wgsl"),
-        );
-        gfx.shader(
-            "cubemap_mipmap",
-            include_str!("../core/shaders/cubemap_mipmap.wgsl"),
-        );
-        gfx.shader(
-            "brdf_integration",
-            include_str!("../core/shaders/brdf_integration.wgsl"),
-        );
+            "engine/shaders/prefilter_environment.wgsl",
+        )?;
+        gfx.shader_asset("cubemap_mipmap", "engine/shaders/cubemap_mipmap.wgsl")?;
+        gfx.shader_asset("brdf_integration", "engine/shaders/brdf_integration.wgsl")?;
         // post_processing.new_effect(size, surface_format, Effect::ChromaticTwo);
 
         //We cant initialize audio in the browser before a user has interacted with the website.
         //Therefor we have to only instantiate the audio handler when in native
-        Self {
+        Ok(Self {
             surface,
             surface_configured: false,
             size,
@@ -273,7 +271,8 @@ impl State {
             scroll_y: 0,
             egui_renderer,
             backend,
-        }
+            event_registry: EventRegistry::default(),
+        })
     }
 
     pub fn window(&self) -> &Arc<Window> {
@@ -323,7 +322,13 @@ impl State {
             self.surface_configured = false;
         }
     }
-    pub fn input(&mut self, event: &WindowEvent) {
+    pub fn input(&mut self, event: &WindowEvent, game: &mut Box<dyn Game>) {
+        let size_f: PhysicalSize<f32> =
+            PhysicalSize::new(self.size.width as f32, self.size.height as f32);
+        let world = self.graphics.get_world();
+        let world = world.borrow();
+        self.event_registry
+            .process(game.as_mut(), event, &size_f, &mut self.graphics, &world);
         if let Some(audio_handler) = self.graphics.engine.audio_handler.as_mut() {
             audio_handler.update_from_keypress(event);
         }

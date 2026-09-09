@@ -1,3 +1,4 @@
+pub mod event_handler;
 pub mod event_loop;
 pub mod graphics;
 pub mod gui;

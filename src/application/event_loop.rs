@@ -10,7 +10,10 @@ use winit::{
 
 use crate::{
     application::state::{Game, State},
-    core::render::ComputeHandle,
+    core::{
+        assets::asset_loader::{Assets, ENGINE_ASSETS},
+        render::ComputeHandle,
+    },
     systems::compute::ReadbackState,
 };
 
@@ -43,6 +46,7 @@ where
     next_frame: web_time::Instant,
     proxy: Option<EventLoopProxy<UserEvent<U>>>,
     last_time: web_time::Instant,
+    asset_root: String,
 
     #[cfg(target_arch = "wasm32")]
     pending: std::rc::Rc<std::cell::RefCell<Option<(State, Box<dyn Game>)>>>,
@@ -68,10 +72,32 @@ where
             proxy: Some(event_loop.create_proxy()),
             last_time: web_time::Instant::now(),
             next_frame: web_time::Instant::now(),
+            asset_root: "assets".to_owned(),
             #[cfg(target_arch = "wasm32")]
             pending: std::rc::Rc::new(std::cell::RefCell::new(None)),
         }
     }
+
+    pub fn asset_root(mut self, root: impl Into<String>) -> Self {
+        self.asset_root = root.into();
+        self
+    }
+}
+
+async fn create_ready_game(
+    window: Arc<Window>,
+    mut game: Box<dyn Game>,
+    asset_root: String,
+) -> anyhow::Result<(State, Box<dyn Game>)> {
+    let manifest = game.assets();
+    let mut assets = Assets::new(asset_root);
+    assets
+        .load_all(ENGINE_ASSETS.iter().copied().chain(manifest.iter()))
+        .await?;
+
+    let mut state = State::new(window, assets).await?;
+    game.setup(&mut state);
+    Ok((state, game))
 }
 
 pub trait AppLifecycle<U>: 'static {
@@ -114,14 +140,18 @@ where
         #[cfg(target_arch = "wasm32")]
         {
             let proxy = self.proxy.clone().unwrap();
-            let mut game = self.game_loop.take().unwrap();
+            let game = self.game_loop.take().unwrap();
+            let asset_root = self.asset_root.clone();
 
             let pending = self.pending.clone();
 
             wasm_bindgen_futures::spawn_local(async move {
-                let mut state = State::new(window.clone()).await;
-
-                game.setup(&mut state);
+                let (mut state, game) = create_ready_game(window.clone(), game, asset_root)
+                    .await
+                    .unwrap_or_else(|error| {
+                        log::error!("engine startup failed: {error:#}");
+                        panic!("engine startup failed: {error:#}");
+                    });
 
                 let size = state.window().inner_size();
 
@@ -139,9 +169,11 @@ where
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Some(mut game_loop) = self.game_loop.take() {
-                let mut state = pollster::block_on(State::new(window.clone()));
-                game_loop.setup(&mut state);
+            if let Some(game_loop) = self.game_loop.take() {
+                let asset_root = self.asset_root.clone();
+                let (mut state, game_loop) =
+                    pollster::block_on(create_ready_game(window.clone(), game_loop, asset_root))
+                        .unwrap_or_else(|error| panic!("engine startup failed: {error:#}"));
                 //INFO: to initiate sound in WASM scenarios, you must call this function from a
                 //user input in the browser. Otherwise it wont launch
                 state.graphics.engine.init_sound(1.6, 1.2);
@@ -295,7 +327,7 @@ where
             }
 
             _ => {
-                state.input(&event);
+                state.input(&event, game);
                 let world = state.graphics.get_world();
                 let world = world.borrow();
 

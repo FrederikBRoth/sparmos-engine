@@ -23,6 +23,7 @@ use crate::{
         pipelines::{
             ComputeRenderingBuilder, MaterialBuilder, PipelineConfig, RenderPipelineBuilder,
         },
+        post_processing::Effect,
         render::{
             ComputeHandle, InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext,
             RenderInstanceRef, Renderable, RenderableHandle, SkyboxRenderable,
@@ -49,6 +50,29 @@ pub struct PhysicsRenderBatch {
 
 //Main API access to all functions required for rendering objects
 impl Graphics {
+    pub fn asset(&self, path: &str) -> Arc<[u8]> {
+        self.engine.resources.assets.require(path)
+    }
+
+    pub fn shader_asset(&mut self, label: &str, path: &str) -> anyhow::Result<()> {
+        let bytes = self.asset(path);
+        let source = std::str::from_utf8(&bytes)?;
+        self.shader(label, source);
+        Ok(())
+    }
+
+    pub fn post_process_effect(&mut self, effect: Effect) -> anyhow::Result<()> {
+        let bytes = self.asset("engine/shaders/chromatic_aberration.wgsl");
+        let source = std::str::from_utf8(&bytes)?;
+        let context = &mut self.engine.render_context;
+        let size = (context.config.width, context.config.height).into();
+        let format = context.config.format;
+        context
+            .post_processing
+            .new_effect(size, format, effect, source);
+        Ok(())
+    }
+
     pub fn add_renderable(
         &mut self,
         material_handle: MaterialHandle,
