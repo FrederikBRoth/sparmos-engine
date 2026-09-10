@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashSet, mem, rc::Rc, sync::Arc, time::Duration};
+use std::{cell::RefCell, mem, rc::Rc, sync::Arc, time::Duration};
 
 use cgmath::{Quaternion, Rotation3, Vector3};
 use hecs::{DynamicBundle, Entity, Query, QueryBorrow};

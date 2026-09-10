@@ -327,6 +327,7 @@ impl State {
             PhysicalSize::new(self.size.width as f32, self.size.height as f32);
         let world = self.graphics.get_world();
         let world = world.borrow();
+
         self.event_registry
             .process(game.as_mut(), event, &size_f, &mut self.graphics, &world);
         if let Some(audio_handler) = self.graphics.engine.audio_handler.as_mut() {
