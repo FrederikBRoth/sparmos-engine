@@ -38,9 +38,9 @@ pub mod prelude {
         {
             console_log::init_with_level(log::Level::Info).unwrap();
         }
-        let _dummy = EventLoop::<UserEvent<U>>::with_user_event()
-            .build()
-            .unwrap();
+        // let _dummy = EventLoop::<UserEvent<U>>::with_user_event()
+        //     .build()
+        //     .unwrap();
         let event_loop = EventLoop::<UserEvent<U>>::with_user_event()
             .build()
             .er(EventLoopEr::new)?;

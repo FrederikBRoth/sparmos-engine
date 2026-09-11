@@ -124,6 +124,7 @@ where
     fn resumed_inner(&mut self, event_loop: &ActiveEventLoop) -> Er<(), WindowResumedEr> {
         #[allow(unused_mut)]
         let mut window_attributes = Window::default_attributes();
+        window_attributes.title = "Sparmos Engine".to_string();
 
         #[cfg(target_arch = "wasm32")]
         {
