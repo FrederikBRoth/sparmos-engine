@@ -13,14 +13,17 @@ pub use wgpu;
 pub use winit;
 
 pub mod prelude {
+    use er::{Er, ErResult};
     use winit::event_loop::EventLoop;
 
     use crate::application::{
         event_loop::{App, AppLifecycle, UserEvent},
         state::Game,
     };
-
-    pub fn run_game<U, G, L>(hooks: G, gameloop: L) -> anyhow::Result<()>
+    #[derive(Er)]
+    pub struct EventLoopEr;
+    // pub struct Event
+    pub fn run_game<U, G, L>(hooks: G, gameloop: L) -> Er<(), EventLoopEr>
     where
         U: 'static + Send,
         G: AppLifecycle<U> + 'static,
@@ -35,14 +38,19 @@ pub mod prelude {
         {
             console_log::init_with_level(log::Level::Info).unwrap();
         }
-
-        let event_loop = EventLoop::<UserEvent<U>>::with_user_event()
+        let _dummy = EventLoop::<UserEvent<U>>::with_user_event()
             .build()
             .unwrap();
+        let event_loop = EventLoop::<UserEvent<U>>::with_user_event()
+            .build()
+            .er(EventLoopEr::new)?;
 
         let mut app = App::new(&event_loop, hooks, gameloop);
+        event_loop.run_app(&mut app).er(EventLoopEr::new)?;
 
-        event_loop.run_app(&mut app).unwrap();
+        if let Some(error) = app.error {
+            return Err(error);
+        }
         Ok(())
     }
 }

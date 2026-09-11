@@ -1,3 +1,4 @@
+use er::{Er, ErResult, ErTree};
 use std::sync::Arc;
 use wgpu::{BufferView, MapRangeError};
 use winit::{
@@ -14,6 +15,7 @@ use crate::{
         assets::asset_loader::{Assets, ENGINE_ASSETS},
         render::ComputeHandle,
     },
+    prelude::EventLoopEr,
     systems::compute::ReadbackState,
 };
 
@@ -47,6 +49,7 @@ where
     proxy: Option<EventLoopProxy<UserEvent<U>>>,
     last_time: web_time::Instant,
     asset_root: String,
+    pub error: Option<ErTree<EventLoopEr>>,
 
     #[cfg(target_arch = "wasm32")]
     pending: std::rc::Rc<std::cell::RefCell<Option<(State, Box<dyn Game>)>>>,
@@ -73,6 +76,7 @@ where
             last_time: web_time::Instant::now(),
             next_frame: web_time::Instant::now(),
             asset_root: "assets".to_owned(),
+            error: None,
             #[cfg(target_arch = "wasm32")]
             pending: std::rc::Rc::new(std::cell::RefCell::new(None)),
         }
@@ -81,6 +85,11 @@ where
     pub fn asset_root(mut self, root: impl Into<String>) -> Self {
         self.asset_root = root.into();
         self
+    }
+
+    fn fail(&mut self, event_loop: &ActiveEventLoop, error: ErTree<EventLoopEr>) {
+        self.error = Some(error);
+        event_loop.exit();
     }
 }
 
@@ -106,24 +115,29 @@ pub trait AppLifecycle<U>: 'static {
     fn on_device_event(&mut self, event: DeviceEvent, proxy: &mut State);
 }
 
-impl<U: Send + 'static> ApplicationHandler<UserEvent<U>> for App<U>
+#[derive(Er)]
+pub struct WindowResumedEr;
+impl<U: Send + 'static> App<U>
 where
     U: Send + 'static,
 {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    fn resumed_inner(&mut self, event_loop: &ActiveEventLoop) -> Er<(), WindowResumedEr> {
         #[allow(unused_mut)]
         let mut window_attributes = Window::default_attributes();
 
         #[cfg(target_arch = "wasm32")]
         {
+            use er::ErOption;
             use wasm_bindgen::JsCast;
             use winit::platform::web::WindowAttributesExtWebSys;
 
             const CANVAS_ID: &str = "canvas";
 
-            let window = wgpu::web_sys::window().unwrap_throw();
-            let document = window.document().unwrap_throw();
-            let canvas = document.get_element_by_id(CANVAS_ID).unwrap_throw();
+            let window = wgpu::web_sys::window().er(WindowResumedEr::new)?;
+            let document = window.document().er(WindowResumedEr::new)?;
+            let canvas = document
+                .get_element_by_id(CANVAS_ID)
+                .er(WindowResumedEr::new)?;
             let html_canvas_element = canvas.unchecked_into();
             window_attributes = window_attributes.with_canvas(Some(html_canvas_element));
         }
@@ -135,10 +149,16 @@ where
             }));
         }
 
-        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
+        let window = event_loop
+            .create_window(window_attributes)
+            .er(WindowResumedEr::new)?;
+
+        let window = Arc::new(window);
 
         #[cfg(target_arch = "wasm32")]
         {
+            use er::ErOption;
+
             let proxy = self.proxy.clone().unwrap();
             let game = self.game_loop.take().unwrap();
             let asset_root = self.asset_root.clone();
@@ -164,16 +184,19 @@ where
                 let _ = proxy.send_event(UserEvent::EngineEvent(EngineEvent::EngineReady));
             });
 
-            self.hooks.on_resumed(&self.proxy.clone().unwrap());
+            let cloned_proxy = &self.proxy.clone().er(WindowResumedEr::new)?;
+            self.hooks.on_resumed(cloned_proxy);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
         {
+            use er::ErOption;
+
             if let Some(game_loop) = self.game_loop.take() {
                 let asset_root = self.asset_root.clone();
                 let (mut state, game_loop) =
                     pollster::block_on(create_ready_game(window.clone(), game_loop, asset_root))
-                        .unwrap_or_else(|error| panic!("engine startup failed: {error:#}"));
+                        .er(WindowResumedEr::new)?;
                 //INFO: to initiate sound in WASM scenarios, you must call this function from a
                 //user input in the browser. Otherwise it wont launch
                 state.graphics.engine.init_sound(1.6, 1.2);
@@ -182,8 +205,20 @@ where
                 self.game_loop = Some(game_loop);
             }
 
-            let proxy = self.proxy.clone().unwrap();
+            let proxy = self.proxy.clone().er(WindowResumedEr::new)?;
             self.hooks.on_resumed(&proxy);
+        }
+        Ok(())
+    }
+}
+impl<U: Send + 'static> ApplicationHandler<UserEvent<U>> for App<U>
+where
+    U: Send + 'static,
+{
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        match self.resumed_inner(event_loop).er(|| EventLoopEr::new()) {
+            Ok(_) => {}
+            Err(error) => self.fail(event_loop, error),
         }
     }
 

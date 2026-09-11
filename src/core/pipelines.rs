@@ -209,7 +209,7 @@ impl<'a> RenderPipelineBuilder<'a> {
 pub struct MaterialKey {
     pub(crate) bindings: Vec<MaterialBindingKey>,
     pub vertex_layout: VertexLayoutKey,
-    pub instance_layout: VertexLayoutKey,
+    pub instance_layout: Option<VertexLayoutKey>,
     pub shader: String,
     pub target_format: Option<wgpu::TextureFormat>,
 }
@@ -220,7 +220,7 @@ pub struct Material {
     pub pipeline_layout: PipelineLayout,
     pub pipeline: RenderPipeline,
     pub bind_groups: Vec<Option<BindGroup>>,
-    pub ic_buffer_layout: VertexBufferLayoutOwned,
+    pub ic_buffer_layout: Option<VertexBufferLayoutOwned>,
     pub mesh_buffer_layout: VertexBufferLayoutOwned,
     bind_group_layouts: Vec<Option<BindGroupLayout>>,
     binding_layout_entries: Vec<Option<Vec<wgpu::BindGroupLayoutEntry>>>,
@@ -230,10 +230,13 @@ pub struct Material {
 impl Material {
     pub fn change_shader(&mut self, device: &Device, format: TextureFormat, shader: &ShaderModule) {
         let target_format = self.key.target_format.unwrap_or(format);
-        let state = RenderPipelineBuilder::from_shader(device, "Render Pipeline", shader)
+        let mut state = RenderPipelineBuilder::from_shader(device, "Render Pipeline", shader)
             .target_format(target_format)
-            .vertex_layout(self.mesh_buffer_layout.clone())
-            .vertex_layout(self.ic_buffer_layout.clone())
+            .vertex_layout(self.mesh_buffer_layout.clone());
+        if let Some(instance_layout) = &self.ic_buffer_layout {
+            state = state.vertex_layout(instance_layout.clone());
+        }
+        let state = state
             .existing_pipeline_layout(&self.pipeline_layout)
             .build();
         self.pipeline = state.pipeline;
@@ -294,7 +297,7 @@ pub struct MaterialBuilder<'a> {
     pub(crate) bindings: BindGroupBuilder,
     pub(crate) shader: String,
     pub(crate) vertex_layout: VertexBufferLayoutOwned,
-    pub(crate) instance_layout: VertexBufferLayoutOwned,
+    pub(crate) instance_layout: Option<VertexBufferLayoutOwned>,
     pub(crate) config: PipelineConfig,
 }
 
@@ -303,7 +306,10 @@ impl<'a> MaterialBuilder<'a> {
         MaterialKey {
             bindings: bindings.keys(),
             vertex_layout: self.vertex_layout.key(),
-            instance_layout: self.instance_layout.key(),
+            instance_layout: match self.instance_layout.clone() {
+                Some(key) => Some(key.key()),
+                None => None,
+            },
             shader: self.shader.clone(),
             target_format: self.config.target_format,
         }
@@ -443,8 +449,10 @@ impl<'a> MaterialBuilder<'a> {
                 .shader(&self.shader)
                 .config(self.config)
                 .target_format(target_format)
-                .vertex_layout(self.vertex_layout.clone())
-                .vertex_layout(self.instance_layout.clone());
+                .vertex_layout(self.vertex_layout.clone());
+        if let Some(instance_layout) = &self.instance_layout {
+            pipeline_builder = pipeline_builder.vertex_layout(instance_layout.clone());
+        }
         for (group, layout) in built_bindings.layouts.iter().enumerate() {
             if let Some(layout) = layout {
                 pipeline_builder = pipeline_builder.bind_group_layout(group as u32, layout);

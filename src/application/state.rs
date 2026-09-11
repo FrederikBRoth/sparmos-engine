@@ -23,6 +23,7 @@ use crate::core::entities::World;
 use crate::core::post_processing::PostProcessHandler;
 use crate::core::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext};
 use crate::core::resource::Resources;
+use crate::core::scene::scene_handler::SceneHandler;
 use crate::core::texture::Texture;
 
 use crate::systems::compute::ReadbackState;
@@ -234,6 +235,7 @@ impl State {
         };
         let mut gfx = Graphics {
             world: Rc::new(RefCell::new(World::new(hecs::World::new()))),
+            scenes: SceneHandler::default(),
             engine,
         };
 
@@ -326,7 +328,7 @@ impl State {
         let size_f: PhysicalSize<f32> =
             PhysicalSize::new(self.size.width as f32, self.size.height as f32);
         let world = self.graphics.get_world();
-        let world = world.borrow();
+        let world = world.borrow_mut();
 
         self.event_registry
             .process(game.as_mut(), event, &size_f, &mut self.graphics, &world);
@@ -465,6 +467,7 @@ impl State {
                             &self.backend,
                             &self.graphics.engine,
                             &self.graphics.world.borrow(),
+                            &self.graphics.scenes,
                         );
                     }
 
@@ -575,6 +578,7 @@ impl State {
                             &self.backend,
                             &self.graphics.engine,
                             &self.graphics.world.borrow(),
+                            &self.graphics.scenes,
                         );
                     }
                 }

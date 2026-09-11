@@ -24,6 +24,7 @@ web-time = "1.1"
 dot_vox = "5.2.0"
 rand = "0.9"
 spin_sleep = "1.3"
+er = { git = "https://github.com/Viterkim/er" }
 egui = { git = "https://github.com/FrederikBRoth/egui-winit-fix" }
 egui-wgpu = { git = "https://github.com/FrederikBRoth/egui-winit-fix", features = [
     "winit",

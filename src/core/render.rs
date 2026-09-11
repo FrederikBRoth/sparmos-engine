@@ -13,6 +13,7 @@ use crate::{
         models::model::Model,
         pipelines::{ComputeRendering, ComputeRenderingKey, Material, MaterialKey},
         post_processing::PostProcessHandler,
+        scene::scene_handler::SceneHandler,
         texture::{Texture, TextureDepth},
     },
     systems::compute::Compute,
@@ -73,7 +74,13 @@ pub struct RenderInstanceRef {
 }
 
 impl<'a> DrawMesh for wgpu::RenderPass<'a> {
-    fn draw_scene(&mut self, _backend: &DeviceBackend, engine: &Engine, world: &World) {
+    fn draw_scene(
+        &mut self,
+        _backend: &DeviceBackend,
+        engine: &Engine,
+        world: &World,
+        scenes: &SceneHandler,
+    ) {
         let scene = &engine.render_context.gpu_objects;
         world.query::<&Model>(|mut query| {
             for model in query.iter() {
@@ -100,11 +107,36 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                 }
             }
         });
-        for (_, renderable) in scene.renderables.iter() {
-            let mesh = &scene.meshes[renderable.mesh_handle];
-            let material = &scene.materials[renderable.material_handle];
-            let instance_controller =
-                &scene.instance_controllers[renderable.instance_controller_handle];
+
+        let scene_world = &scenes.scenes[scenes.current].world.borrow();
+        scene_world.query::<&RenderableHandle>(|mut query| {
+            for renderable_handle in query.iter() {
+                let renderable = &engine.render_context.gpu_objects.renderables[*renderable_handle];
+                let mesh = &scene.meshes[renderable.mesh_handle];
+                let material = &scene.materials[renderable.material_handle];
+                let instance_controller =
+                    &scene.instance_controllers[renderable.instance_controller_handle];
+                self.set_pipeline(&material.pipeline);
+                for (group, bind_group) in material.bind_groups.iter().enumerate() {
+                    if let Some(bind_group) = bind_group {
+                        self.set_bind_group(group as u32, bind_group, &[]);
+                    }
+                }
+
+                self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                self.set_vertex_buffer(1, instance_controller.buffer().slice(..));
+                self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+
+                self.draw_indexed(
+                    0..mesh.index_count,
+                    0,
+                    0..instance_controller.count() as u32,
+                );
+            }
+        });
+        scene_world.query_first::<&mut SkyboxRenderable>(|skybox| {
+            let material = &scene.materials[skybox.material_handle];
+            let mesh = &scene.meshes[skybox.mesh_handle];
             self.set_pipeline(&material.pipeline);
             for (group, bind_group) in material.bind_groups.iter().enumerate() {
                 if let Some(bind_group) = bind_group {
@@ -113,15 +145,33 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             }
 
             self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            self.set_vertex_buffer(1, instance_controller.buffer().slice(..));
             self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
-            self.draw_indexed(
-                0..mesh.index_count,
-                0,
-                0..instance_controller.count() as u32,
-            );
-        }
+            self.draw_indexed(0..mesh.index_count, 0, 0..1);
+        });
+
+        // for (_, renderable) in scene.renderables.iter() {
+        //     let mesh = &scene.meshes[renderable.mesh_handle];
+        //     let material = &scene.materials[renderable.material_handle];
+        //     let instance_controller =
+        //         &scene.instance_controllers[renderable.instance_controller_handle];
+        //     self.set_pipeline(&material.pipeline);
+        //     for (group, bind_group) in material.bind_groups.iter().enumerate() {
+        //         if let Some(bind_group) = bind_group {
+        //             self.set_bind_group(group as u32, bind_group, &[]);
+        //         }
+        //     }
+        //
+        //     self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+        //     self.set_vertex_buffer(1, instance_controller.buffer().slice(..));
+        //     self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        //
+        //     self.draw_indexed(
+        //         0..mesh.index_count,
+        //         0,
+        //         0..instance_controller.count() as u32,
+        //     );
+        // }
 
         world.query::<&ComputeRenderable>(|mut query| {
             for renderable in query.iter() {
@@ -140,27 +190,33 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             }
         });
 
-        world.query_first::<&mut SkyboxRenderable>(|skybox| {
-            let material = &scene.materials[skybox.material_handle];
-            let mesh = &scene.meshes[skybox.mesh_handle];
-            self.set_pipeline(&material.pipeline);
-            for (group, bind_group) in material.bind_groups.iter().enumerate() {
-                if let Some(bind_group) = bind_group {
-                    self.set_bind_group(group as u32, bind_group, &[]);
-                }
-            }
-
-            self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-
-            self.draw_indexed(0..mesh.index_count, 0, 0..1);
-        });
+        // world.query_first::<&mut SkyboxRenderable>(|skybox| {
+        //     let material = &scene.materials[skybox.material_handle];
+        //     let mesh = &scene.meshes[skybox.mesh_handle];
+        //     self.set_pipeline(&material.pipeline);
+        //     for (group, bind_group) in material.bind_groups.iter().enumerate() {
+        //         if let Some(bind_group) = bind_group {
+        //             self.set_bind_group(group as u32, bind_group, &[]);
+        //         }
+        //     }
+        //
+        //     self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+        //     self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        //
+        //     self.draw_indexed(0..mesh.index_count, 0, 0..1);
+        // });
     }
 }
 
 pub trait DrawMesh {
     #[allow(unused)]
-    fn draw_scene(&mut self, backend: &DeviceBackend, engine: &Engine, world: &World);
+    fn draw_scene(
+        &mut self,
+        backend: &DeviceBackend,
+        engine: &Engine,
+        world: &World,
+        scenes: &SceneHandler,
+    );
 }
 new_key_type! { pub struct MeshHandle; }
 new_key_type! { pub struct MaterialHandle; }

@@ -12,5 +12,6 @@ pub mod pipelines;
 pub mod post_processing;
 pub mod render;
 pub mod resource;
+pub mod scene;
 pub mod sprites;
 pub mod texture;

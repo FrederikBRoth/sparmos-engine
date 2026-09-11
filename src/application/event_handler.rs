@@ -241,7 +241,7 @@ impl EventRegistry {
                     world,
                 };
 
-                if let Some(handlers) = self.cursor_state_events.get(&CursorState::Exit) {
+                if let Some(handlers) = self.cursor_state_events.get(&CursorState::Moved) {
                     for handler in handlers {
                         handler(game, &mut cursor_state_event_context);
                     }
@@ -256,7 +256,7 @@ impl EventRegistry {
                     world,
                 };
 
-                if let Some(handlers) = self.cursor_state_events.get(&CursorState::Exit) {
+                if let Some(handlers) = self.cursor_state_events.get(&CursorState::Entered) {
                     for handler in handlers {
                         handler(game, &mut cursor_state_event_context);
                     }

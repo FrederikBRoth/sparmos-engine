@@ -15,6 +15,7 @@ use crate::{
         engine::GpuBindableSystem,
         entities::World,
         render::RenderContext,
+        scene::scene_handler::SceneHandle,
     },
     systems::animation::{AnimationHandler, AnimationType},
 };
@@ -619,6 +620,7 @@ impl Default for CameraUniform {
 pub struct CameraSystem {
     pub camera_uniform: CameraUniform,
     pub camera_buffer: Buffer,
+    pub current_user_scene: SceneHandle,
 }
 
 impl CameraSystem {
@@ -639,6 +641,7 @@ impl CameraSystem {
         Self {
             camera_buffer,
             camera_uniform,
+            current_user_scene: SceneHandle::default(),
         }
     }
 

@@ -29,6 +29,7 @@ use crate::{
             RenderInstanceRef, Renderable, RenderableHandle, SkyboxRenderable,
         },
         resource::BufferHandle,
+        scene::scene_handler::{Scene, SceneHandle, SceneHandler},
         texture::{PbrTextureBuilder, Texture, TextureBuilder},
     },
     entities::meshes::Meshes,
@@ -40,6 +41,7 @@ use crate::{
 
 pub struct Graphics {
     pub(crate) world: Rc<RefCell<World>>,
+    pub scenes: SceneHandler,
     pub engine: Engine,
 }
 
@@ -335,9 +337,24 @@ impl Graphics {
             bindings: BindGroupBuilder::new(),
             shader: String::new(),
             vertex_layout: V::layout(),
-            instance_layout: I::layout(),
+            instance_layout: Some(I::layout()),
             config: PipelineConfig::default(),
         }
+    }
+
+    pub fn material_typed_no_ic<V: VertexType>(&mut self) -> MaterialBuilder<'_> {
+        MaterialBuilder {
+            graphics: self,
+            bindings: BindGroupBuilder::new(),
+            shader: String::new(),
+            vertex_layout: V::layout(),
+            instance_layout: None,
+            config: PipelineConfig::default(),
+        }
+    }
+
+    pub fn material_no_ic(&mut self) -> MaterialBuilder<'_> {
+        self.material_typed_no_ic::<Vertex>()
     }
 
     pub fn pipeline<'a>(&'a self, label: &str) -> RenderPipelineBuilder<'a> {
@@ -472,10 +489,10 @@ impl Graphics {
         PbrTextureBuilder::new(self, label)
     }
 
-    pub fn add_skybox(&mut self, skybox_texture: Texture) {
+    pub fn add_skybox(&mut self, skybox_texture: &Texture, world: &mut World) {
         let skybox_mesh = Meshes::create_skybox().make_mb(self.get_render_context_mut());
         let skybox_pipeline = self
-            .material_typed::<Skybox, DefaultInstanceLayout>()
+            .material_typed_no_ic::<Skybox>()
             .shader("skybox")
             .config(PipelineConfig {
                 culling: None,
@@ -490,7 +507,8 @@ impl Graphics {
             material_handle: skybox_pipeline,
             mesh_handle: skybox_mesh,
         };
-        self.add_entity((skybox_renderable,));
+        world.add_entity((skybox_renderable,));
+        // self.add_entity((skybox_renderable,));
     }
 
     pub(crate) fn material_with_texture(
@@ -527,6 +545,30 @@ impl Graphics {
             .gpu_objects
             .material_lookup
             .insert(key, handle);
+        handle
+    }
+
+    pub fn new_scene(
+        &mut self,
+        name: &str,
+        callback: impl Fn(&mut Graphics, &mut World),
+    ) -> SceneHandle {
+        let scene = Scene {
+            name: name.to_string(),
+            ..Default::default()
+        };
+
+        let first = self.scenes.scenes.is_empty();
+
+        let handle = self.scenes.scenes.insert(scene);
+        if first {
+            self.scenes.current = handle;
+        }
+        let scene = self.scenes.scenes.get(handle).unwrap();
+        let world = Rc::clone(&scene.world);
+        let mut world = world.borrow_mut();
+        callback(self, &mut world);
+        self.scenes.scenes_lookup.insert(name.to_string(), handle);
         handle
     }
 }
