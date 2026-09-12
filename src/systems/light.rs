@@ -2,11 +2,10 @@ use cgmath::Vector3;
 
 use crate::core::{
     buffer::{Buffer, BufferType, UniformParameters},
-    engine::GpuBindableSystem,
-    entities::World,
+    engine::ViewSystem,
     render::{
         render::RenderContext,
-        render_view::{self, RenderViewHandle},
+        render_view::{RenderView, RenderViewHandle},
     },
 };
 
@@ -77,8 +76,8 @@ impl LightSystem {
     }
 }
 
-impl GpuBindableSystem for LightSystem {
-    fn get_buffer(&self, render_view: &RenderViewHandle) -> &Buffer {
+impl ViewSystem for LightSystem {
+    fn get_buffer(&self, _render_view: RenderViewHandle) -> &Buffer {
         &self.storage_buffer
     }
 
@@ -86,27 +85,17 @@ impl GpuBindableSystem for LightSystem {
         (0, 1)
     }
 
-    #[allow(unused)]
-    fn update(
+    fn run(
         &mut self,
-        world: &mut World,
-        resources: &mut RenderContext,
-        render_view: &RenderViewHandle,
-
-        dt: std::time::Duration,
-        size: winit::dpi::PhysicalSize<f32>,
+        _view: &mut RenderView,
+        _resources: &mut RenderContext,
+        _render_view: RenderViewHandle,
+        _dt: std::time::Duration,
     ) {
     }
 
-    #[allow(unused)]
-    fn run(
-        &mut self,
-        world: &mut World,
-        resources: &mut RenderContext,
-        render_view: &RenderViewHandle,
-        dt: std::time::Duration,
-    ) {
-        todo!()
+    fn binding_layout_entry(&self) -> wgpu::BindGroupLayoutEntry {
+        self.storage_buffer.layout_entry(1)
     }
 
     // fn register(self, resources: &mut Resources) {

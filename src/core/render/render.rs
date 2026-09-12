@@ -13,7 +13,6 @@ use crate::{
         models::model::Model,
         pipelines::{ComputeRendering, ComputeRenderingKey, Material, MaterialKey},
         post_processing::PostProcessHandler,
-        scene::scene_handler::SceneHandler,
         texture::{Texture, TextureDepth},
     },
     systems::compute::Compute,
@@ -79,7 +78,7 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
         _backend: &DeviceBackend,
         engine: &Engine,
         world: &World,
-        scenes: &SceneHandler,
+        view_bind_groups: &[Option<wgpu::BindGroup>],
     ) {
         let scene = &engine.render_context.gpu_objects;
         world.query::<&Model>(|mut query| {
@@ -89,6 +88,11 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                 for (mesh, _) in model.meshes.iter().cloned() {
                     let material = &scene.materials[model.materials[&mesh]];
                     self.set_pipeline(&material.pipeline);
+                    for (group, bind_group) in view_bind_groups.iter().enumerate() {
+                        if let Some(bind_group) = bind_group {
+                            self.set_bind_group(group as u32, bind_group, &[]);
+                        }
+                    }
                     let mesh = &scene.meshes[mesh];
                     for (group, bind_group) in material.bind_groups.iter().enumerate() {
                         if let Some(bind_group) = bind_group {
@@ -108,8 +112,7 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             }
         });
 
-        let scene_world = &scenes.scenes[scenes.current].world.borrow();
-        scene_world.query::<&RenderableHandle>(|mut query| {
+        world.query::<&RenderableHandle>(|mut query| {
             for renderable_handle in query.iter() {
                 let renderable = &engine.render_context.gpu_objects.renderables[*renderable_handle];
                 let mesh = &scene.meshes[renderable.mesh_handle];
@@ -117,6 +120,11 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                 let instance_controller =
                     &scene.instance_controllers[renderable.instance_controller_handle];
                 self.set_pipeline(&material.pipeline);
+                for (group, bind_group) in view_bind_groups.iter().enumerate() {
+                    if let Some(bind_group) = bind_group {
+                        self.set_bind_group(group as u32, bind_group, &[]);
+                    }
+                }
                 for (group, bind_group) in material.bind_groups.iter().enumerate() {
                     if let Some(bind_group) = bind_group {
                         self.set_bind_group(group as u32, bind_group, &[]);
@@ -134,10 +142,15 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                 );
             }
         });
-        scene_world.query_first::<&mut SkyboxRenderable>(|skybox| {
+        world.query_first::<&mut SkyboxRenderable>(|skybox| {
             let material = &scene.materials[skybox.material_handle];
             let mesh = &scene.meshes[skybox.mesh_handle];
             self.set_pipeline(&material.pipeline);
+            for (group, bind_group) in view_bind_groups.iter().enumerate() {
+                if let Some(bind_group) = bind_group {
+                    self.set_bind_group(group as u32, bind_group, &[]);
+                }
+            }
             for (group, bind_group) in material.bind_groups.iter().enumerate() {
                 if let Some(bind_group) = bind_group {
                     self.set_bind_group(group as u32, bind_group, &[]);
@@ -178,6 +191,11 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                 let rendering = &scene.compute_renderings[renderable.rendering_handle];
                 let mesh = &scene.meshes[renderable.mesh_handle];
                 self.set_pipeline(&rendering.pipeline);
+                for (group, bind_group) in view_bind_groups.iter().enumerate() {
+                    if let Some(bind_group) = bind_group {
+                        self.set_bind_group(group as u32, bind_group, &[]);
+                    }
+                }
                 for (group, bind_group) in rendering.bind_groups.iter().enumerate() {
                     if let Some(bind_group) = bind_group {
                         self.set_bind_group(group as u32, bind_group, &[]);
@@ -215,7 +233,7 @@ pub trait DrawMesh {
         backend: &DeviceBackend,
         engine: &Engine,
         world: &World,
-        scenes: &SceneHandler,
+        view_bind_groups: &[Option<wgpu::BindGroup>],
     );
 }
 new_key_type! { pub struct MeshHandle; }

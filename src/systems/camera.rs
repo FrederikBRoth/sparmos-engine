@@ -3,7 +3,6 @@ use cgmath::{
     Vector3, Vector4,
 };
 use indexmap::IndexMap;
-use slotmap::SlotMap;
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, KeyEvent, WindowEvent},
@@ -11,17 +10,13 @@ use winit::{
 };
 
 use crate::{
-    application::graphics::Graphics,
     core::{
         buffer::{Buffer, BufferType, UniformParameters},
-        engine::GpuBindableSystem,
-        entities::World,
+        engine::ViewSystem,
         render::{
-            self,
             render::RenderContext,
-            render_view::{self, RenderTarget, RenderView, RenderViewHandle},
+            render_view::{RenderTarget, RenderView, RenderViewHandle, RenderViewRole},
         },
-        scene::scene_handler::SceneHandle,
     },
     systems::animation::{AnimationHandler, AnimationType},
 };
@@ -147,7 +142,6 @@ pub struct Camera {
     pub target: cgmath::Point3<f32>,
     pub up: cgmath::Vector3<f32>,
     pub screen_size: PhysicalSize<f32>,
-    pub render_target: RenderTarget,
     pub aspect: f32,
     pub fovy: f32,
     pub znear: f32,
@@ -179,11 +173,8 @@ pub struct Camera {
 
 impl Camera {
     pub fn new(render_target: RenderTarget, speed: f32, sensitivity: f32) -> Self {
-        ///TODO: add textureBuffer functionality to Camera
-        let screen_size = match render_target {
-            RenderTarget::Fullscreen(initial_size) => initial_size,
-            RenderTarget::TextureBuffer(texture_handle) => todo!(),
-        };
+        let size = render_target.size();
+        let screen_size = PhysicalSize::new(size.width as f32, size.height as f32);
         let eye = Point3::new(0.0, 0.0, -400.0);
         let target = Point3::new(0.0, 0.0, 0.0);
 
@@ -220,7 +211,6 @@ impl Camera {
             auto: false,
             speed,
             sensitivity,
-            render_target,
         };
         camera.update_forward();
         camera
@@ -638,50 +628,50 @@ pub struct CameraSystem {
     pub cameras: IndexMap<RenderViewHandle, CameraBuffer>,
 }
 
+impl Default for CameraSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CameraSystem {
     pub fn new() -> Self {
         Self {
             cameras: IndexMap::default(),
         }
     }
-    pub fn new_camera(
+    fn new_camera(
         &mut self,
-        gfx: &mut Graphics,
-        camera: &Camera,
+        rc: &RenderContext,
+        view: &RenderView,
         render_view_handle: RenderViewHandle,
     ) {
         let mut camera_uniform = CameraUniform::new();
-        let display_to_render_ndc_scale = gfx
-            .get_render_context()
-            .post_processing
-            .display_to_render_ndc_scale();
-        camera_uniform.update_view_proj(camera, display_to_render_ndc_scale);
+        camera_uniform.update_view_proj(&view.camera, view_ndc_scale(view, rc));
         let camera_buffer = Buffer::new_init(
             &[camera_uniform],
-            gfx.get_device_mut(),
+            &rc.device,
             BufferType::UniformBuffer(UniformParameters::default()),
         );
 
-        log::warn!("Shader");
-        let camer_buffer = CameraBuffer {
+        let camera_buffer = CameraBuffer {
             camera_buffer,
             camera_uniform,
         };
 
-        self.cameras.insert(render_view_handle, camer_buffer);
+        self.cameras.insert(render_view_handle, camera_buffer);
     }
 
     pub fn update_camera(
         &mut self,
-        camera: &Camera,
+        view: &RenderView,
         rc: &mut RenderContext,
         render_view_handle: &RenderViewHandle,
     ) {
         let buffer = self.cameras.get_mut(render_view_handle).unwrap();
-        let display_to_render_ndc_scale = rc.post_processing.display_to_render_ndc_scale();
         buffer
             .camera_uniform
-            .update_view_proj(camera, display_to_render_ndc_scale);
+            .update_view_proj(&view.camera, view_ndc_scale(view, rc));
         rc.queue.write_buffer(
             &buffer.camera_buffer.buffer,
             0,
@@ -717,47 +707,62 @@ pub fn normalize_and_map_camera_height(x: i64, a: i64, b: i64, start: f32, end: 
     start + (end * 2.0) * normalized
 }
 
-impl GpuBindableSystem for CameraSystem {
-    fn run(
+impl ViewSystem for CameraSystem {
+    fn prepare_view(
         &mut self,
-        world: &mut World,
-        rc: &mut RenderContext,
-        render: &RenderViewHandle,
-        dt: std::time::Duration,
+        view: &RenderView,
+        resources: &mut RenderContext,
+        render_view: RenderViewHandle,
     ) {
-        world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
-            camera.update_camera(dt);
-            camera_animator.update(dt.as_secs_f32(), camera);
-            self.update_camera(camera, rc, render);
-        });
+        if !self.cameras.contains_key(&render_view) {
+            self.new_camera(resources, view, render_view);
+        }
     }
 
-    fn get_buffer(&self, render_view: &RenderViewHandle) -> &Buffer {
-        &self.cameras.get(render_view).unwrap().camera_buffer
+    fn run(
+        &mut self,
+        view: &mut RenderView,
+        rc: &mut RenderContext,
+        render: RenderViewHandle,
+        dt: std::time::Duration,
+    ) {
+        view.camera.update_camera(dt);
+        if let Some(animator) = &mut view.camera_animator {
+            animator.update(dt.as_secs_f32(), &mut view.camera);
+        }
+        self.update_camera(view, rc, &render);
+    }
+
+    fn get_buffer(&self, render_view: RenderViewHandle) -> &Buffer {
+        &self.cameras.get(&render_view).unwrap().camera_buffer
     }
 
     fn binding_location(&self) -> (u32, u32) {
         (0, 0)
     }
 
-    fn update(
-        &mut self,
-        world: &mut World,
-        resources: &mut RenderContext,
-        render_view: &RenderViewHandle,
-        dt: std::time::Duration,
-        size: PhysicalSize<f32>,
-    ) {
-        world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, _camera_animator)| {
-            camera.resize(size);
-            camera.update_camera(dt);
-            self.update_camera(camera, resources, render_view);
-        });
+    fn binding_layout_entry(&self) -> wgpu::BindGroupLayoutEntry {
+        wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }
     }
-    // fn register(self, resources: &mut crate::core::resource::Resources) {
-    //     let type_id = TypeId::of::<Self>();
-    //
-    //     resources.buffers.insert(self.camera_buffer.clone());
-    //     resources.resource_map.insert(type_id, Box::new(self));
-    // }
+
+    fn remove_view(&mut self, render_view: RenderViewHandle) {
+        self.cameras.shift_remove(&render_view);
+    }
+}
+
+fn view_ndc_scale(view: &RenderView, rc: &RenderContext) -> f32 {
+    if view.role == RenderViewRole::Main && view.render_target.is_window() {
+        rc.post_processing.display_to_render_ndc_scale()
+    } else {
+        1.0
+    }
 }

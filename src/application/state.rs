@@ -1,7 +1,6 @@
 use std::any::Any;
-use std::cell::{Ref, RefCell};
+use std::cell::Ref;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
@@ -22,7 +21,7 @@ use crate::core::entities::World;
 
 use crate::core::post_processing::PostProcessHandler;
 use crate::core::render::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext};
-use crate::core::render::render_view::RenderViewHandler;
+use crate::core::render::render_view::{RenderTarget, RenderViewHandler, RenderViewRole};
 use crate::core::resource::Resources;
 use crate::core::scene::scene_handler::SceneHandler;
 use crate::core::texture::Texture;
@@ -231,12 +230,11 @@ impl State {
             },
             render_commands: Vec::new(),
             audio_handler: None,
-            systems: Systems { systems: vec![] },
+            systems: Systems::default(),
             resources: Resources::new(assets),
             audio_triggers: None,
         };
         let mut gfx = Graphics {
-            world: Rc::new(RefCell::new(World::new(hecs::World::new()))),
             scenes: SceneHandler::default(),
             render_views: RenderViewHandler::default(),
             engine,
@@ -244,7 +242,7 @@ impl State {
 
         //Default systems
         //TODO: Should be moved into somewhere else
-        gfx.add_system(System::gpu_bindable(CameraSystem::new()));
+        gfx.add_system(System::view(CameraSystem::new()));
 
         //Setup basic systems
         //Compute
@@ -300,8 +298,7 @@ impl State {
             );
             self.surface_configured = true;
 
-            let f_size = PhysicalSize::new(new_size.width as f32, new_size.height as f32);
-            self.graphics.update_all_systems(f_size);
+            self.graphics.resize_window_views(new_size);
             // if let Some(game_loop) = self.game_loop.as_mut() {
             //     game_loop.resize(&self.render_context.config);
             // }
@@ -325,6 +322,16 @@ impl State {
                 .render_context
                 .post_processing
                 .resize(new_size);
+
+            for (_, view) in self
+                .graphics
+                .render_views
+                .views
+                .iter_mut()
+                .filter(|(_, view)| view.render_target.is_window())
+            {
+                view.camera.fovy = map_value(view.camera.aspect, 0.8, 1.88, 25.0, 55.0);
+            }
         } else {
             println!("Not configured");
             log::warn!("Not Configured");
@@ -332,6 +339,18 @@ impl State {
         }
     }
     pub fn input(&mut self, event: &WindowEvent, game: &mut Box<dyn Game>) {
+        let main_view =
+            self.graphics
+                .render_views
+                .views
+                .iter_mut()
+                .find_map(|(handle, render_view)| {
+                    (render_view.enabled
+                        && render_view.role == RenderViewRole::Main
+                        && render_view.render_target.is_window())
+                    .then_some(render_view)
+                });
+        main_view.unwrap().camera.process_events(event);
         let size_f: PhysicalSize<f32> =
             PhysicalSize::new(self.size.width as f32, self.size.height as f32);
         let world = self.graphics.get_world();
@@ -345,9 +364,17 @@ impl State {
     }
     //
     pub fn update(&mut self, dt: std::time::Duration) {
+        self.begin_frame(dt);
+        self.update_scenes(dt);
+    }
+
+    pub(crate) fn begin_frame(&mut self, dt: std::time::Duration) {
         self.graphics.engine.engine_time.update_time(dt, true);
+    }
+
+    pub(crate) fn update_scenes(&mut self, dt: std::time::Duration) {
         self.graphics.update_render_animations(dt);
-        self.graphics.run_all_systems();
+        self.graphics.run_scene_systems();
         self.graphics.sync_render_instances();
         self.graphics.update_instance_controllers();
     }
@@ -356,6 +383,8 @@ impl State {
         if !self.surface_configured {
             return;
         }
+
+        self.graphics.run_view_systems();
 
         match self.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(surface_texture) => {
@@ -372,10 +401,11 @@ impl State {
                         label: Some("Render Encoder"),
                     });
                 {
-                    self.graphics
-                        .world
-                        .borrow()
-                        .query::<&ComputeHandle>(|mut query| {
+                    for (_, scene) in self.graphics.scenes.scenes.iter() {
+                        if !scene.should_simulate() {
+                            continue;
+                        }
+                        scene.world.borrow().query::<&ComputeHandle>(|mut query| {
                             for compute in query.iter() {
                                 let compute_pipeline = self
                                     .graphics
@@ -418,7 +448,91 @@ impl State {
                                 }
                             }
                         });
+                    }
                 }
+
+                let auxiliary_views = self
+                    .graphics
+                    .render_views
+                    .views
+                    .iter()
+                    .filter_map(|(handle, render_view)| {
+                        (render_view.enabled && render_view.role == RenderViewRole::Auxiliary)
+                            .then_some(handle)
+                    })
+                    .collect::<Vec<_>>();
+                for handle in auxiliary_views {
+                    let render_view = &self.graphics.render_views.views[handle];
+                    let RenderTarget::Texture {
+                        texture,
+                        view_index,
+                        depth_texture,
+                        size,
+                        ..
+                    } = &render_view.render_target
+                    else {
+                        continue;
+                    };
+                    let scene = self
+                        .graphics
+                        .scenes
+                        .get(render_view.scene)
+                        .expect("RenderView references a deleted scene");
+                    let textures = &self.graphics.engine.render_context.gpu_objects.textures;
+                    let target_view = &textures[*texture].texture[*view_index].view;
+                    let resolved_depth =
+                        depth_texture.map(|(handle, index)| &textures[handle].texture[index].view);
+                    let depth_attachment =
+                        resolved_depth.map(|depth_view| wgpu::RenderPassDepthStencilAttachment {
+                            view: depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        });
+                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Auxiliary RenderView Pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: target_view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: depth_attachment,
+                        ..Default::default()
+                    });
+                    render_pass.set_viewport(
+                        0.0,
+                        0.0,
+                        size.width as f32,
+                        size.height as f32,
+                        0.0,
+                        1.0,
+                    );
+                    render_pass.set_scissor_rect(0, 0, size.width, size.height);
+                    render_pass.draw_scene(
+                        &self.backend,
+                        &self.graphics.engine,
+                        &scene.world.borrow(),
+                        self.graphics.engine.systems.view_bind_groups(handle),
+                    );
+                }
+
+                let main_view =
+                    self.graphics
+                        .render_views
+                        .views
+                        .iter()
+                        .find_map(|(handle, render_view)| {
+                            (render_view.enabled
+                                && render_view.role == RenderViewRole::Main
+                                && render_view.render_target.is_window())
+                            .then_some(handle)
+                        });
 
                 if !self
                     .graphics
@@ -470,12 +584,20 @@ impl State {
                                 timestamp_writes: None,
                                 ..Default::default()
                             });
-                        render_pass.draw_scene(
-                            &self.backend,
-                            &self.graphics.engine,
-                            &self.graphics.world.borrow(),
-                            &self.graphics.scenes,
-                        );
+                        if let Some(handle) = main_view {
+                            let render_view = &self.graphics.render_views.views[handle];
+                            let scene = self
+                                .graphics
+                                .scenes
+                                .get(render_view.scene)
+                                .expect("RenderView references a deleted scene");
+                            render_pass.draw_scene(
+                                &self.backend,
+                                &self.graphics.engine,
+                                &scene.world.borrow(),
+                                self.graphics.engine.systems.view_bind_groups(handle),
+                            );
+                        }
                     }
 
                     while let Some((_, post_process)) = post_processes.next() {
@@ -581,12 +703,20 @@ impl State {
                                 ..Default::default()
                             });
 
-                        render_pass.draw_scene(
-                            &self.backend,
-                            &self.graphics.engine,
-                            &self.graphics.world.borrow(),
-                            &self.graphics.scenes,
-                        );
+                        if let Some(handle) = main_view {
+                            let render_view = &self.graphics.render_views.views[handle];
+                            let scene = self
+                                .graphics
+                                .scenes
+                                .get(render_view.scene)
+                                .expect("RenderView references a deleted scene");
+                            render_pass.draw_scene(
+                                &self.backend,
+                                &self.graphics.engine,
+                                &scene.world.borrow(),
+                                self.graphics.engine.systems.view_bind_groups(handle),
+                            );
+                        }
                     }
                 }
 
@@ -629,8 +759,9 @@ impl State {
                                 .engine
                                 .change_shader_inner(&material_handle, &shader);
                         }
-                        EngineCommandQueue::AddEntity(fn_once) => {
-                            let mut world = self.graphics.world.borrow_mut();
+                        EngineCommandQueue::AddEntity(scene, fn_once) => {
+                            let world = self.graphics.world(scene);
+                            let mut world = world.borrow_mut();
                             fn_once(&mut world.entities);
                         }
                     }

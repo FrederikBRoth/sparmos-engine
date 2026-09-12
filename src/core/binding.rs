@@ -121,20 +121,6 @@ impl BindGroupBuilder {
         self
     }
 
-    pub(crate) fn contains(&self, group: u32, binding: u32) -> bool {
-        self.bindings
-            .get(&group)
-            .is_some_and(|bindings| bindings.contains_key(&binding))
-    }
-
-    pub(crate) fn contains_buffer(&self, buffer: &Buffer) -> bool {
-        self.bindings.values().any(|bindings| {
-            bindings.values().any(|binding| {
-                matches!(binding, MaterialBinding::Buffer { buffer: registered } if registered.key == buffer.key)
-            })
-        })
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn texture_view(
         &mut self,

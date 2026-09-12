@@ -25,10 +25,9 @@ use crate::{
         },
         post_processing::Effect,
         render::{
-            self,
             render::{
                 ComputeHandle, InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext,
-                RenderInstanceRef, Renderable, RenderableHandle, SkyboxRenderable,
+                RenderInstanceRef, Renderable, RenderableHandle, SkyboxRenderable, TextureHandle,
             },
             render_view::{self, RenderViewHandle, RenderViewHandler},
         },
@@ -44,7 +43,6 @@ use crate::{
 };
 
 pub struct Graphics {
-    pub(crate) world: Rc<RefCell<World>>,
     pub scenes: SceneHandler,
     pub render_views: RenderViewHandler,
     pub engine: Engine,
@@ -130,9 +128,27 @@ impl Graphics {
         self.change_shader(&material, shader);
     }
 
-    /// Register one body. A controller slot may have only one ECS transform owner.
+    /// Register one body in the active gameplay scene.
+    /// A controller slot may have only one ECS transform owner.
     pub fn spawn_physics_for_instance(
         &mut self,
+        renderable: RenderableHandle,
+        instance_index: usize,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> Entity {
+        self.spawn_physics_for_instance_in_scene(
+            self.active_gameplay_scene(),
+            renderable,
+            instance_index,
+            collider,
+            rigid_body,
+        )
+    }
+
+    pub fn spawn_physics_for_instance_in_scene(
+        &mut self,
+        scene: SceneHandle,
         renderable: RenderableHandle,
         instance_index: usize,
         collider: Collider,
@@ -149,7 +165,8 @@ impl Graphics {
             .render_instance(render_ref)
             .transform
             .clone();
-        self.spawn_physics_transforms(
+        self.spawn_physics_transforms_in_scene(
+            scene,
             renderable,
             vec![(instance_index, transform)],
             collider,
@@ -157,9 +174,24 @@ impl Graphics {
         )[0]
     }
 
-    /// Register every existing instance as an independent body in the same batch.
+    /// Register every existing instance in the active gameplay scene.
     pub fn spawn_physics_for_renderable(
         &mut self,
+        batch: RenderableHandle,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> Vec<Entity> {
+        self.spawn_physics_for_renderable_in_scene(
+            self.active_gameplay_scene(),
+            batch,
+            collider,
+            rigid_body,
+        )
+    }
+
+    pub fn spawn_physics_for_renderable_in_scene(
+        &mut self,
+        scene: SceneHandle,
         batch: RenderableHandle,
         collider: Collider,
         rigid_body: RigidBody,
@@ -170,7 +202,8 @@ impl Graphics {
             .iter()
             .map(|instance| instance.transform.clone())
             .collect();
-        self.spawn_physics_transforms(
+        self.spawn_physics_transforms_in_scene(
+            scene,
             batch,
             transforms.into_iter().enumerate().collect(),
             collider,
@@ -178,8 +211,9 @@ impl Graphics {
         )
     }
 
-    fn spawn_physics_transforms(
+    fn spawn_physics_transforms_in_scene(
         &mut self,
+        scene: SceneHandle,
         batch: RenderableHandle,
         transforms: Vec<(usize, Transform)>,
         collider: Collider,
@@ -196,7 +230,7 @@ impl Graphics {
                 },
             )
         });
-        let world = Rc::clone(&self.world);
+        let world = self.world(scene);
         if let Ok(mut world) = world.try_borrow_mut() {
             bundles.map(|bundle| world.add_entity(bundle)).collect()
         } else {
@@ -207,15 +241,16 @@ impl Graphics {
                 .map(|bundle| (world.entities.reserve_entity(), bundle))
                 .collect();
             let entities = pending.iter().map(|(entity, _)| *entity).collect();
-            self.engine
-                .render_commands
-                .push(AddEntity(Box::new(move |world| {
+            self.engine.render_commands.push(AddEntity(
+                scene,
+                Box::new(move |world| {
                     for (entity, bundle) in pending {
                         world
                             .insert(entity, bundle)
                             .expect("reserved physics entity must exist");
                     }
-                })));
+                }),
+            ));
             entities
         }
     }
@@ -229,34 +264,63 @@ impl Graphics {
         collider: Collider,
         rigid_body: RigidBody,
     ) -> PhysicsRenderBatch {
+        self.add_physics_entity_to_scene(
+            self.active_gameplay_scene(),
+            material,
+            mesh,
+            instance_controller,
+            collider,
+            rigid_body,
+        )
+    }
+
+    pub fn add_physics_entity_to_scene(
+        &mut self,
+        scene: SceneHandle,
+        material: MaterialHandle,
+        mesh: MeshHandle,
+        instance_controller: InstanceControllerHandle,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> PhysicsRenderBatch {
         let batch = self.add_renderable(material, mesh, instance_controller);
-        let entities = self.spawn_physics_for_renderable(batch, collider, rigid_body);
+        // The GPU batch is global, while this component declares that the batch
+        // belongs to this scene and must be drawn by its RenderViews.
+        self.add_entity_to_scene(scene, (batch,));
+        let entities =
+            self.spawn_physics_for_renderable_in_scene(scene, batch, collider, rigid_body);
         PhysicsRenderBatch { batch, entities }
     }
 
     pub(crate) fn update_render_animations(&mut self, dt: Duration) {
         let objects = &mut self.engine.render_context.gpu_objects;
-        self.world
-            .borrow()
-            .query::<(&RenderableHandle, &mut AnimationHandler)>(|mut query| {
-                for (batch_ref, animation) in query.iter() {
-                    let batch = objects
-                        .renderable(*batch_ref)
-                        .expect("invalid RenderBatchHandle");
-                    let handle = batch.instance_controller_handle;
-                    let controller = objects
-                        .instance_controllers
-                        .get_mut(handle)
-                        .expect("invalid InstanceControllerHandle");
-                    animation.update_instance(dt.as_secs_f32(), controller.instances_mut());
-                }
-            });
+        for (_, scene) in self.scenes.scenes.iter() {
+            if !scene.should_simulate() {
+                continue;
+            }
+            scene
+                .world
+                .borrow()
+                .query::<(&RenderableHandle, &mut AnimationHandler)>(|mut query| {
+                    for (batch_ref, animation) in query.iter() {
+                        let batch = objects
+                            .renderable(*batch_ref)
+                            .expect("invalid RenderBatchHandle");
+                        let handle = batch.instance_controller_handle;
+                        let controller = objects
+                            .instance_controllers
+                            .get_mut(handle)
+                            .expect("invalid InstanceControllerHandle");
+                        animation.update_instance(dt.as_secs_f32(), controller.instances_mut());
+                    }
+                });
+        }
     }
     pub(crate) fn sync_render_instances(&mut self) {
-        self.engine
-            .render_context
-            .gpu_objects
-            .sync_render_instances(&self.world.borrow());
+        let objects = &mut self.engine.render_context.gpu_objects;
+        for (_, scene) in self.scenes.scenes.iter() {
+            objects.sync_render_instances(&scene.world.borrow());
+        }
     }
 
     pub(crate) fn update_instance_controllers(&mut self) {
@@ -266,27 +330,42 @@ impl Graphics {
         }
     }
 
-    pub(crate) fn run_all_systems(&mut self) {
-        self.engine.systems.run_all(
+    pub(crate) fn run_scene_systems(&mut self) {
+        self.engine.systems.run_scene_systems(
             &mut self.scenes,
+            &mut self.engine.render_context,
+            self.engine.engine_time.dt(),
+        );
+    }
+
+    pub(crate) fn run_view_systems(&mut self) {
+        self.engine.systems.run_view_systems(
             &mut self.render_views,
             &mut self.engine.render_context,
             self.engine.engine_time.dt(),
         );
     }
 
-    pub(crate) fn update_all_systems(&mut self, size: PhysicalSize<f32>) {
-        self.engine.systems.update_all(
-            &mut self.scenes,
-            &mut self.render_views,
-            &mut self.engine.render_context,
-            self.engine.engine_time.dt(),
-            size,
-        );
+    pub(crate) fn resize_window_views(&mut self, size: PhysicalSize<u32>) {
+        self.render_views.resize_window_targets(size);
     }
 
     pub fn get_world(&self) -> Rc<RefCell<World>> {
-        Rc::clone(&self.world)
+        self.scenes.active_world()
+    }
+
+    pub fn world(&self, scene: SceneHandle) -> Rc<RefCell<World>> {
+        Rc::clone(&self.scenes.get(scene).expect("invalid SceneHandle").world)
+    }
+
+    pub fn active_gameplay_scene(&self) -> SceneHandle {
+        self.scenes
+            .active_gameplay_scene()
+            .expect("no active gameplay scene; create or select a scene first")
+    }
+
+    pub fn set_active_gameplay_scene(&mut self, scene: SceneHandle) {
+        self.scenes.set_active_gameplay_scene(scene);
     }
     pub fn shader(&mut self, label: &str, shader_path: &str) {
         self.engine.render_context.add_shader(label, shader_path);
@@ -309,10 +388,6 @@ impl Graphics {
         &self.engine.render_context.queue
     }
 
-    /// Returns a mutable reference to the get device of this [`Graphics`].
-    pub(crate) fn get_device_mut(&mut self) -> &mut Arc<Device> {
-        &mut self.engine.render_context.device
-    }
     /// Returns a mutable reference to the get queue of this [`Graphics`].
     #[allow(unused)]
     pub(crate) fn get_queue_mut(&mut self) -> &mut Arc<Queue> {
@@ -407,26 +482,57 @@ impl Graphics {
     }
 
     pub fn add_system(&mut self, system: System) {
+        assert!(
+            !matches!(&system, System::ViewBindable(_))
+                || (self.engine.render_context.gpu_objects.materials.is_empty()
+                    && self
+                        .engine
+                        .render_context
+                        .gpu_objects
+                        .compute_renderings
+                        .is_empty()),
+            "view systems must be registered before render materials are built"
+        );
         self.engine.systems.add(system);
     }
 
     pub fn add_entity<B: DynamicBundle + 'static>(&mut self, bundle: B) -> Entity {
-        let world = Rc::clone(&self.world);
+        self.add_entity_to_scene(self.active_gameplay_scene(), bundle)
+    }
+
+    pub fn add_entity_to_scene<B: DynamicBundle + 'static>(
+        &mut self,
+        scene: SceneHandle,
+        bundle: B,
+    ) -> Entity {
+        let world = self.world(scene);
         if let Ok(mut world) = world.try_borrow_mut() {
             world.add_entity(bundle)
         } else {
             let entity = world.borrow().entities.reserve_entity();
             let entity_clone = entity;
-            let command = AddEntity(Box::new(move |world| {
-                world.insert(entity_clone, bundle).unwrap();
-            }));
+            let command = AddEntity(
+                scene,
+                Box::new(move |world| {
+                    world.insert(entity_clone, bundle).unwrap();
+                }),
+            );
             self.engine.render_commands.push(command);
             entity
         }
     }
 
     pub fn entity_query_first<B: Query>(&self, f: impl for<'a> FnOnce(<B as Query>::Item<'a>)) {
-        let world = &self.world.borrow();
+        self.entity_query_first_in_scene(self.active_gameplay_scene(), f);
+    }
+
+    pub fn entity_query_first_in_scene<B: Query>(
+        &self,
+        scene: SceneHandle,
+        f: impl for<'a> FnOnce(<B as Query>::Item<'a>),
+    ) {
+        let world = self.world(scene);
+        let world = world.borrow();
 
         world.query_first(f);
     }
@@ -446,7 +552,16 @@ impl Graphics {
     //     }
     // }
     pub fn entity_query<B: Query>(&self, f: impl for<'a> FnOnce(QueryBorrow<'a, B>)) {
-        let world = &self.world.borrow();
+        self.entity_query_in_scene(self.active_gameplay_scene(), f);
+    }
+
+    pub fn entity_query_in_scene<B: Query>(
+        &self,
+        scene: SceneHandle,
+        f: impl for<'a> FnOnce(QueryBorrow<'a, B>),
+    ) {
+        let world = self.world(scene);
+        let world = world.borrow();
 
         world.query(f);
     }
@@ -487,16 +602,19 @@ impl Graphics {
         TextureBuilder::new(self, label)
     }
 
+    pub fn add_texture(&mut self, texture: Texture) -> TextureHandle {
+        self.engine
+            .render_context
+            .gpu_objects
+            .textures
+            .insert(texture)
+    }
+
     pub fn pbr_texture<'a>(&'a mut self, label: &'a str) -> PbrTextureBuilder<'a> {
         PbrTextureBuilder::new(self, label)
     }
 
-    pub fn add_skybox(
-        &mut self,
-        skybox_texture: &Texture,
-        world: &mut World,
-        render_view: &RenderViewHandle,
-    ) {
+    pub fn add_skybox(&mut self, skybox_texture: &Texture, world: &mut World) {
         let skybox_mesh = Meshes::create_skybox().make_mb(self.get_render_context_mut());
         let skybox_pipeline = self
             .material_typed_no_ic::<Skybox>()
@@ -507,8 +625,8 @@ impl Graphics {
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 target_format: None,
             })
-            .texture(&skybox_texture, 1, 0)
-            .build(render_view);
+            .texture(skybox_texture, 1, 0)
+            .build();
 
         let skybox_renderable = SkyboxRenderable {
             material_handle: skybox_pipeline,
@@ -560,6 +678,10 @@ impl Graphics {
         name: &str,
         callback: impl Fn(&mut Graphics, &mut World),
     ) -> SceneHandle {
+        assert!(
+            !self.scenes.scenes_lookup.contains_key(name),
+            "scene name '{name}' is already in use"
+        );
         let scene = Scene {
             name: name.to_string(),
             ..Default::default()
@@ -569,7 +691,7 @@ impl Graphics {
 
         let handle = self.scenes.scenes.insert(scene);
         if first {
-            self.scenes.current = handle;
+            self.scenes.set_active_gameplay_scene(handle);
         }
         let scene = self.scenes.scenes.get(handle).unwrap();
         let world = Rc::clone(&scene.world);
@@ -577,6 +699,45 @@ impl Graphics {
         callback(self, &mut world);
         self.scenes.scenes_lookup.insert(name.to_string(), handle);
         handle
+    }
+
+    pub fn new_render_view(
+        &mut self,
+        name: impl Into<String>,
+        scene: SceneHandle,
+        target: render_view::RenderTarget,
+        role: render_view::RenderViewRole,
+    ) -> RenderViewHandle {
+        assert!(
+            self.scenes.scenes.contains_key(scene),
+            "invalid SceneHandle"
+        );
+        self.render_views.new_view(target, scene, name, role)
+    }
+
+    pub fn set_render_view_scene(&mut self, view: RenderViewHandle, scene: SceneHandle) {
+        assert!(
+            self.scenes.scenes.contains_key(scene),
+            "invalid SceneHandle"
+        );
+        self.render_views.get_render_view_mut(view).scene = scene;
+    }
+
+    pub fn remove_render_view(&mut self, handle: RenderViewHandle) -> bool {
+        let removed = self.render_views.remove(handle).is_some();
+        if removed {
+            self.engine.systems.remove_view(handle);
+        }
+        removed
+    }
+
+    pub fn remove_scene(&mut self, handle: SceneHandle) -> bool {
+        let dependent_views = self.render_views.remove_for_scene(handle);
+        for view in dependent_views {
+            self.engine.systems.remove_view(view);
+        }
+        self.engine.systems.remove_scene(handle);
+        self.scenes.remove(handle).is_some()
     }
 }
 

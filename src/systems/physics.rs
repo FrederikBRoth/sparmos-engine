@@ -4,7 +4,7 @@ use cgmath::{InnerSpace, Vector3, vec3};
 use hecs::Entity;
 
 use crate::core::{
-    engine::DefaultSystem,
+    engine::SceneSystem,
     entities::World,
     instance::Transform,
     physics::{
@@ -13,6 +13,7 @@ use crate::core::{
         solver::{ImpulseSolver, PositionSolver, Solver},
     },
     render::render::RenderContext,
+    scene::scene_handler::SceneHandle,
 };
 pub(crate) const PHYSICS_DT: f32 = 1.0 / 60.0;
 const VELOCITY_ITERATIONS: usize = 10;
@@ -33,6 +34,7 @@ pub struct PhysicsDiagnostics {
 
 pub struct PhysicsSystem {
     current_dt: f32,
+    scene_dt: HashMap<SceneHandle, f32>,
     gravity: Vector3<f32>,
     impulse_solver: ImpulseSolver,
     position_solver: PositionSolver,
@@ -44,6 +46,7 @@ impl PhysicsSystem {
     pub fn new(gravity: Vector3<f32>) -> Self {
         Self {
             current_dt: 0.0,
+            scene_dt: HashMap::new(),
             gravity,
             impulse_solver: ImpulseSolver::default(),
             position_solver: PositionSolver,
@@ -183,21 +186,29 @@ impl PhysicsSystem {
             );
         }
     }
+
+    fn advance_scene(&mut self, scene: SceneHandle, world: &mut World, dt: std::time::Duration) {
+        let scene_dt = self.scene_dt.remove(&scene).unwrap_or_default();
+        let direct_dt = std::mem::replace(&mut self.current_dt, scene_dt);
+        self.advance(world, dt);
+        let scene_dt = std::mem::replace(&mut self.current_dt, direct_dt);
+        self.scene_dt.insert(scene, scene_dt);
+    }
 }
 
-impl DefaultSystem for PhysicsSystem {
-    fn run(&mut self, world: &mut World, _resources: &mut RenderContext, dt: std::time::Duration) {
-        self.advance(world, dt);
+impl SceneSystem for PhysicsSystem {
+    fn run(
+        &mut self,
+        scene: SceneHandle,
+        world: &mut World,
+        _resources: &mut RenderContext,
+        dt: std::time::Duration,
+    ) {
+        self.advance_scene(scene, world, dt);
     }
 
-    #[allow(unused)]
-    fn update(
-        &mut self,
-        world: &mut World,
-        resources: &mut RenderContext,
-        dt: std::time::Duration,
-        size: winit::dpi::PhysicalSize<f32>,
-    ) {
+    fn remove_scene(&mut self, scene: SceneHandle) {
+        self.scene_dt.remove(&scene);
     }
 }
 
@@ -268,4 +279,32 @@ fn grid_cell(position: Vector3<f32>) -> (i32, i32, i32) {
 
 fn ordered_pair(a: usize, b: usize) -> (usize, usize) {
     if a < b { (a, b) } else { (b, a) }
+}
+
+#[cfg(test)]
+mod tests {
+    use slotmap::SlotMap;
+
+    use super::*;
+
+    #[test]
+    fn fixed_timestep_accumulators_are_scene_local() {
+        let mut handles = SlotMap::<SceneHandle, ()>::with_key();
+        let scene_a = handles.insert(());
+        let scene_b = handles.insert(());
+        let mut system = PhysicsSystem::new(Vector3::new(0.0, -9.81, 0.0));
+        let mut world_a = World::new(hecs::World::new());
+        let mut world_b = World::new(hecs::World::new());
+        let half_step = std::time::Duration::from_secs_f32(PHYSICS_DT * 0.5);
+
+        system.advance_scene(scene_a, &mut world_a, half_step);
+        system.advance_scene(scene_b, &mut world_b, half_step);
+
+        assert!((system.scene_dt[&scene_a] - PHYSICS_DT * 0.5).abs() < f32::EPSILON);
+        assert!((system.scene_dt[&scene_b] - PHYSICS_DT * 0.5).abs() < f32::EPSILON);
+        system.advance_scene(scene_a, &mut world_a, half_step);
+        assert!(system.scene_dt[&scene_a] < f32::EPSILON);
+        assert!((system.scene_dt[&scene_b] - PHYSICS_DT * 0.5).abs() < f32::EPSILON);
+        assert_eq!(system.current_dt, 0.0);
+    }
 }

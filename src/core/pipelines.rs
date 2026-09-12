@@ -10,10 +10,7 @@ use crate::{
         binding::{BindGroupBuilder, MaterialBindingKey},
         buffer::{Buffer, BufferType, UniformParameters},
         geometry::{VertexBufferLayoutOwned, VertexLayoutKey, VertexType},
-        render::{
-            render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle, RenderContext},
-            render_view::{self, RenderViewHandle},
-        },
+        render::render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle, RenderContext},
         resource::BufferHandle,
         texture::Texture,
     },
@@ -420,12 +417,7 @@ impl<'a> MaterialBuilder<'a> {
         self
     }
 
-    pub fn build(mut self, render_view: &RenderViewHandle) -> MaterialHandle {
-        for (group, binding, buffer) in self.graphics.engine.systems.get_bindings(render_view) {
-            if !self.bindings.contains_buffer(buffer) && !self.bindings.contains(group, binding) {
-                self.bindings.buffer(buffer, group, binding);
-            }
-        }
+    pub fn build(self) -> MaterialHandle {
         let key = self.key(&self.bindings);
 
         //if this material exists already, just return the existing handle
@@ -439,9 +431,22 @@ impl<'a> MaterialBuilder<'a> {
             println!("{:?} clashes with another implemented material", key);
             return handle;
         }
-        let built_bindings = self
-            .bindings
-            .build(self.graphics.get_device(), "material bind group");
+        let device = self.graphics.engine.render_context.device.clone();
+        let view_layouts = self
+            .graphics
+            .engine
+            .systems
+            .view_bind_group_layouts(&device);
+        let built_bindings = self.bindings.build(&device, "material bind group");
+
+        for (group, (view_layout, material_layout)) in
+            view_layouts.iter().zip(&built_bindings.layouts).enumerate()
+        {
+            assert!(
+                view_layout.is_none() || material_layout.is_none(),
+                "material bindings cannot share bind group {group} with render-view bindings"
+            );
+        }
 
         let target_format = self
             .config
@@ -455,6 +460,11 @@ impl<'a> MaterialBuilder<'a> {
                 .vertex_layout(self.vertex_layout.clone());
         if let Some(instance_layout) = &self.instance_layout {
             pipeline_builder = pipeline_builder.vertex_layout(instance_layout.clone());
+        }
+        for (group, layout) in view_layouts.iter().enumerate() {
+            if let Some(layout) = layout {
+                pipeline_builder = pipeline_builder.bind_group_layout(group as u32, layout);
+            }
         }
         for (group, layout) in built_bindings.layouts.iter().enumerate() {
             if let Some(layout) = layout {
@@ -621,8 +631,8 @@ impl<'a> ComputeRenderingBuilder<'a> {
         self
     }
 
-    pub fn build(self, render_view: &RenderViewHandle) -> ComputeRenderingHandle {
-        let device = &self.graphics.engine.render_context.device;
+    pub fn build(self) -> ComputeRenderingHandle {
+        let device = self.graphics.engine.render_context.device.clone();
 
         let shader = self
             .graphics
@@ -642,17 +652,13 @@ impl<'a> ComputeRenderingBuilder<'a> {
 
         let render_buffer = compute.render_buffer.clone();
         let length = compute.length;
+        let view_layouts = self
+            .graphics
+            .engine
+            .systems
+            .view_bind_group_layouts(&device);
         let mut bindings = BindGroupBuilder::new();
-        let system_bindings = self.graphics.engine.systems.get_bindings(render_view);
-        let mut next_group = system_bindings
-            .iter()
-            .map(|(group, _, _)| *group)
-            .max()
-            .map(|group| group + 1)
-            .unwrap_or(0);
-        for (group, binding, buffer) in system_bindings {
-            bindings.buffer(buffer, group, binding);
-        }
+        let mut next_group = view_layouts.len() as u32;
         for buffer in &self.input_buffers {
             bindings.buffer(buffer, next_group, 0);
             next_group += 1;
@@ -673,11 +679,15 @@ impl<'a> ComputeRenderingBuilder<'a> {
             return handle;
         }
 
-        let built_bindings = bindings.build(device, "compute rendering bind group");
-        let bind_group_layouts = built_bindings
-            .layouts
-            .iter()
-            .map(Option::as_ref)
+        let built_bindings = bindings.build(&device, "compute rendering bind group");
+        let group_count = view_layouts.len().max(built_bindings.layouts.len());
+        let bind_group_layouts = (0..group_count)
+            .map(|group| {
+                view_layouts
+                    .get(group)
+                    .and_then(Option::as_ref)
+                    .or_else(|| built_bindings.layouts.get(group).and_then(Option::as_ref))
+            })
             .collect::<Vec<_>>();
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -686,7 +696,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
             ..Default::default()
         });
 
-        let pipeline = self.create_compute_rendering_pipeline(device, &pipeline_layout, shader);
+        let pipeline = self.create_compute_rendering_pipeline(&device, &pipeline_layout, shader);
 
         let compute_rendering = ComputeRendering {
             key: key.clone(),
