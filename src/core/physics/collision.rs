@@ -8,7 +8,7 @@ use crate::{
     core::{
         entities::World,
         instance::Transform,
-        render::{GpuObjects, RenderInstanceRef, RenderableHandle},
+        render::render::{GpuObjects, RenderInstanceRef, RenderableHandle},
     },
 };
 

@@ -12,6 +12,7 @@ use crate::core::{
         rigidbody::{BodyType, RigidBody},
         solver::{ImpulseSolver, PositionSolver, Solver},
     },
+    render::render::RenderContext,
 };
 pub(crate) const PHYSICS_DT: f32 = 1.0 / 60.0;
 const VELOCITY_ITERATIONS: usize = 10;
@@ -185,12 +186,7 @@ impl PhysicsSystem {
 }
 
 impl DefaultSystem for PhysicsSystem {
-    fn run(
-        &mut self,
-        world: &mut World,
-        _resources: &mut crate::core::render::RenderContext,
-        dt: std::time::Duration,
-    ) {
+    fn run(&mut self, world: &mut World, _resources: &mut RenderContext, dt: std::time::Duration) {
         self.advance(world, dt);
     }
 
@@ -198,7 +194,7 @@ impl DefaultSystem for PhysicsSystem {
     fn update(
         &mut self,
         world: &mut World,
-        resources: &mut crate::core::render::RenderContext,
+        resources: &mut RenderContext,
         dt: std::time::Duration,
         size: winit::dpi::PhysicalSize<f32>,
     ) {

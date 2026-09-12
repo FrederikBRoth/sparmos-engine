@@ -14,7 +14,7 @@ use crate::{
         buffer::{Buffer, BufferType, UniformParameters},
         geometry::VertexBufferLayoutOwned,
         pipelines::{PipelineConfig, RenderPipelineBuilder},
-        render::RenderContext,
+        render::render::RenderContext,
     },
 };
 

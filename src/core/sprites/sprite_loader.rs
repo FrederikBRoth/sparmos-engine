@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::{application::graphics::Graphics, core::render::TextureHandle};
+use crate::{application::graphics::Graphics, core::render::render::TextureHandle};
 
 #[derive(Debug, Deserialize)]
 pub struct SpriteSheetData {

@@ -25,8 +25,12 @@ use crate::{
         },
         post_processing::Effect,
         render::{
-            ComputeHandle, InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext,
-            RenderInstanceRef, Renderable, RenderableHandle, SkyboxRenderable,
+            self,
+            render::{
+                ComputeHandle, InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext,
+                RenderInstanceRef, Renderable, RenderableHandle, SkyboxRenderable,
+            },
+            render_view::{self, RenderViewHandle, RenderViewHandler},
         },
         resource::BufferHandle,
         scene::scene_handler::{Scene, SceneHandle, SceneHandler},
@@ -42,6 +46,7 @@ use crate::{
 pub struct Graphics {
     pub(crate) world: Rc<RefCell<World>>,
     pub scenes: SceneHandler,
+    pub render_views: RenderViewHandler,
     pub engine: Engine,
 }
 
@@ -263,7 +268,8 @@ impl Graphics {
 
     pub(crate) fn run_all_systems(&mut self) {
         self.engine.systems.run_all(
-            &mut self.world,
+            &mut self.scenes,
+            &mut self.render_views,
             &mut self.engine.render_context,
             self.engine.engine_time.dt(),
         );
@@ -271,7 +277,8 @@ impl Graphics {
 
     pub(crate) fn update_all_systems(&mut self, size: PhysicalSize<f32>) {
         self.engine.systems.update_all(
-            &mut self.world,
+            &mut self.scenes,
+            &mut self.render_views,
             &mut self.engine.render_context,
             self.engine.engine_time.dt(),
             size,
@@ -418,11 +425,6 @@ impl Graphics {
         }
     }
 
-    #[allow(unused)]
-    pub(crate) fn get_buffers(&self) -> Vec<&Buffer> {
-        self.engine.systems.get_buffers()
-    }
-
     pub fn entity_query_first<B: Query>(&self, f: impl for<'a> FnOnce(<B as Query>::Item<'a>)) {
         let world = &self.world.borrow();
 
@@ -489,7 +491,12 @@ impl Graphics {
         PbrTextureBuilder::new(self, label)
     }
 
-    pub fn add_skybox(&mut self, skybox_texture: &Texture, world: &mut World) {
+    pub fn add_skybox(
+        &mut self,
+        skybox_texture: &Texture,
+        world: &mut World,
+        render_view: &RenderViewHandle,
+    ) {
         let skybox_mesh = Meshes::create_skybox().make_mb(self.get_render_context_mut());
         let skybox_pipeline = self
             .material_typed_no_ic::<Skybox>()
@@ -501,7 +508,7 @@ impl Graphics {
                 target_format: None,
             })
             .texture(&skybox_texture, 1, 0)
-            .build();
+            .build(render_view);
 
         let skybox_renderable = SkyboxRenderable {
             material_handle: skybox_pipeline,

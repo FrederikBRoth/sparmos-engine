@@ -8,7 +8,7 @@ use crate::{
     core::{
         geometry::{DefaultVertex, Mesh, Vertex},
         models::model::Model,
-        render::{InstanceControllerHandle, MaterialHandle, TextureHandle},
+        render::render::{InstanceControllerHandle, MaterialHandle, TextureHandle},
         texture::Texture,
     },
 };

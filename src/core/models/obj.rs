@@ -10,7 +10,7 @@ use crate::{
     core::{
         geometry::{DefaultVertex, Vertex},
         models::model::Model,
-        render::{InstanceControllerHandle, MaterialHandle, MeshHandle, TextureHandle},
+        render::render::{InstanceControllerHandle, MaterialHandle, MeshHandle, TextureHandle},
     },
 };
 

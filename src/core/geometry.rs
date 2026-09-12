@@ -8,7 +8,7 @@ use crate::{
     application::graphics::Graphics,
     core::{
         models::model::Model,
-        render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
+        render::render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
     },
 };
 

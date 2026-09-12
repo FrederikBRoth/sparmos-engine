@@ -19,8 +19,12 @@ use crate::{
         geometry::Mesh,
         instance::InstanceControllerTrait,
         pipelines::Material,
-        render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
+        render::{
+            render::{InstanceControllerHandle, MaterialHandle, MeshHandle, RenderContext},
+            render_view::{self, RenderView, RenderViewHandle, RenderViewHandler},
+        },
         resource::Resources,
+        scene::scene_handler::SceneHandler,
     },
 };
 
@@ -43,10 +47,16 @@ impl System {
     {
         Self::Default(Box::new(system))
     }
-    fn run(&mut self, world: &mut World, resources: &mut RenderContext, dt: Duration) {
+    fn run(
+        &mut self,
+        world: &mut World,
+        resources: &mut RenderContext,
+        render_view: &RenderViewHandle,
+        dt: Duration,
+    ) {
         match self {
             System::GpuBindable(gpu_bindable_system) => {
-                gpu_bindable_system.run(world, resources, dt)
+                gpu_bindable_system.run(world, resources, render_view, dt)
             }
             System::Default(default_system) => default_system.run(world, resources, dt),
         }
@@ -56,12 +66,13 @@ impl System {
         &mut self,
         world: &mut World,
         resources: &mut RenderContext,
+        render_view: &RenderViewHandle,
         dt: Duration,
         size: PhysicalSize<f32>,
     ) {
         match self {
             System::GpuBindable(gpu_bindable_system) => {
-                gpu_bindable_system.update(world, resources, dt, size)
+                gpu_bindable_system.update(world, resources, render_view, dt, size)
             }
             System::Default(default_system) => default_system.update(world, resources, dt, size),
         }
@@ -80,13 +91,20 @@ pub trait DefaultSystem {
 }
 
 pub trait GpuBindableSystem {
-    fn run(&mut self, world: &mut World, resources: &mut RenderContext, dt: Duration);
-    fn get_buffer(&self) -> &Buffer;
+    fn run(
+        &mut self,
+        world: &mut World,
+        resources: &mut RenderContext,
+        render_view: &RenderViewHandle,
+        dt: Duration,
+    );
+    fn get_buffer(&self, render_view: &RenderViewHandle) -> &Buffer;
     fn binding_location(&self) -> (u32, u32);
     fn update(
         &mut self,
         world: &mut World,
         resources: &mut RenderContext,
+        render_view: &RenderViewHandle,
         dt: Duration,
         size: PhysicalSize<f32>,
     );
@@ -99,44 +117,62 @@ impl Systems {
 
     pub fn run_all(
         &mut self,
-        world: &mut Rc<RefCell<World>>,
+        scenes: &mut SceneHandler,
+        render_view: &mut RenderViewHandler,
         resources: &mut RenderContext,
         dt: Duration,
     ) {
-        for system in &mut self.systems {
-            system.run(&mut world.borrow_mut(), resources, dt);
+        for (handle, view) in render_view.views.iter_mut() {
+            let scene = scenes.scenes.get(view.scene).unwrap();
+            match view.render_view_mode {
+                render_view::RenderViewMode::Main | render_view::RenderViewMode::Auxiliary => {
+                    for system in &mut self.systems {
+                        system.run(&mut scene.world.borrow_mut(), resources, &handle, dt);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
     pub fn update_all(
         &mut self,
-        world: &mut Rc<RefCell<World>>,
+        scenes: &mut SceneHandler,
+        render_view: &mut RenderViewHandler,
         resources: &mut RenderContext,
         dt: Duration,
         size: PhysicalSize<f32>,
     ) {
-        for system in &mut self.systems {
-            system.update(&mut world.borrow_mut(), resources, dt, size);
+        for (handle, view) in render_view.views.iter_mut() {
+            let scene = scenes.scenes.get(view.scene).unwrap();
+            match view.render_view_mode {
+                render_view::RenderViewMode::Main | render_view::RenderViewMode::Auxiliary => {
+                    for system in &mut self.systems {
+                        system.update(&mut scene.world.borrow_mut(), resources, &handle, dt, size);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
-    pub(crate) fn get_buffers(&self) -> Vec<&Buffer> {
+    pub(crate) fn get_buffers(&self, render_view: &RenderViewHandle) -> Vec<&Buffer> {
         self.systems
             .iter()
             .filter_map(|resource| match resource {
-                System::GpuBindable(gpu_bindable) => Some(gpu_bindable.get_buffer()),
+                System::GpuBindable(gpu_bindable) => Some(gpu_bindable.get_buffer(render_view)),
                 _ => None,
             })
             .collect()
     }
 
-    pub(crate) fn get_bindings(&self) -> Vec<(u32, u32, &Buffer)> {
+    pub(crate) fn get_bindings(&self, render_view: &RenderViewHandle) -> Vec<(u32, u32, &Buffer)> {
         self.systems
             .iter()
             .filter_map(|resource| match resource {
                 System::GpuBindable(gpu_bindable) => {
                     let (group, binding) = gpu_bindable.binding_location();
-                    Some((group, binding, gpu_bindable.get_buffer()))
+                    Some((group, binding, gpu_bindable.get_buffer(render_view)))
                 }
                 _ => None,
             })

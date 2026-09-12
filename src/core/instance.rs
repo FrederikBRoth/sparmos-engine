@@ -4,7 +4,7 @@ use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Rotation3, Vector2, Vecto
 
 use crate::{
     application::graphics::Graphics,
-    core::{geometry::VertexBufferLayoutOwned, render::InstanceControllerHandle},
+    core::{geometry::VertexBufferLayoutOwned, render::render::InstanceControllerHandle},
 };
 
 #[derive(Clone)]

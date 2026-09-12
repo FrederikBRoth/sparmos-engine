@@ -13,7 +13,7 @@ use crate::{
     application::state::{Game, State},
     core::{
         assets::asset_loader::{Assets, ENGINE_ASSETS},
-        render::ComputeHandle,
+        render::render::ComputeHandle,
     },
     prelude::EventLoopEr,
     systems::compute::ReadbackState,

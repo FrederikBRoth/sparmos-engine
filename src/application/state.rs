@@ -17,15 +17,17 @@ use crate::application::event_handler::EventRegistry;
 use crate::application::graphics::Graphics;
 use crate::application::gui::EguiRenderer;
 use crate::core::assets::asset_loader::{AssetManifest, Assets};
-use crate::core::engine::{Arguments, Engine, EngineCommandQueue, EngineTime, Systems};
+use crate::core::engine::{Arguments, Engine, EngineCommandQueue, EngineTime, System, Systems};
 use crate::core::entities::World;
 
 use crate::core::post_processing::PostProcessHandler;
-use crate::core::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext};
+use crate::core::render::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext};
+use crate::core::render::render_view::RenderViewHandler;
 use crate::core::resource::Resources;
 use crate::core::scene::scene_handler::SceneHandler;
 use crate::core::texture::Texture;
 
+use crate::systems::camera::CameraSystem;
 use crate::systems::compute::ReadbackState;
 
 pub enum DeviceBackend {
@@ -236,8 +238,13 @@ impl State {
         let mut gfx = Graphics {
             world: Rc::new(RefCell::new(World::new(hecs::World::new()))),
             scenes: SceneHandler::default(),
+            render_views: RenderViewHandler::default(),
             engine,
         };
+
+        //Default systems
+        //TODO: Should be moved into somewhere else
+        gfx.add_system(System::gpu_bindable(CameraSystem::new()));
 
         //Setup basic systems
         //Compute

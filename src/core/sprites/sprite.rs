@@ -4,7 +4,7 @@ use crate::{
     application::graphics::Graphics,
     core::{
         instance::{Instance, SpriteInstanceLayout},
-        render::{MaterialHandle, RenderableHandle},
+        render::render::{MaterialHandle, RenderableHandle},
         resource::SpriteSheetHandle,
     },
     entities::meshes::Meshes,

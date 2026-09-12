@@ -4,7 +4,7 @@ use crate::{
     application::graphics::Graphics,
     core::{
         models::{self},
-        render::{InstanceControllerHandle, MaterialHandle, MeshHandle, TextureHandle},
+        render::render::{InstanceControllerHandle, MaterialHandle, MeshHandle, TextureHandle},
     },
 };
 

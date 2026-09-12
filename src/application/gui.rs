@@ -5,7 +5,7 @@ use wgpu::{CommandEncoder, Device, StoreOp, TextureFormat, TextureView};
 use winit::event::WindowEvent;
 use winit::window::Window;
 
-use crate::core::render::RenderContext;
+use crate::core::render::render::RenderContext;
 
 pub struct EguiRenderer {
     state: State,

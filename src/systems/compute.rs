@@ -5,7 +5,7 @@ use crate::{
     core::{
         binding::BindGroupBuilder,
         buffer::{Buffer, BufferType, StorageParameters, UniformParameters},
-        render::{ComputeHandle, RenderContext},
+        render::render::{ComputeHandle, RenderContext},
     },
 };
 

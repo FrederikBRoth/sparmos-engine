@@ -2,6 +2,8 @@ use cgmath::{
     EuclideanSpace, InnerSpace, Point3, Quaternion, Rad, Rotation, Rotation3, SquareMatrix,
     Vector3, Vector4,
 };
+use indexmap::IndexMap;
+use slotmap::SlotMap;
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, KeyEvent, WindowEvent},
@@ -14,7 +16,11 @@ use crate::{
         buffer::{Buffer, BufferType, UniformParameters},
         engine::GpuBindableSystem,
         entities::World,
-        render::RenderContext,
+        render::{
+            self,
+            render::RenderContext,
+            render_view::{self, RenderTarget, RenderView, RenderViewHandle},
+        },
         scene::scene_handler::SceneHandle,
     },
     systems::animation::{AnimationHandler, AnimationType},
@@ -141,6 +147,7 @@ pub struct Camera {
     pub target: cgmath::Point3<f32>,
     pub up: cgmath::Vector3<f32>,
     pub screen_size: PhysicalSize<f32>,
+    pub render_target: RenderTarget,
     pub aspect: f32,
     pub fovy: f32,
     pub znear: f32,
@@ -171,7 +178,12 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new(screen_size: PhysicalSize<f32>, speed: f32, sensitivity: f32) -> Self {
+    pub fn new(render_target: RenderTarget, speed: f32, sensitivity: f32) -> Self {
+        ///TODO: add textureBuffer functionality to Camera
+        let screen_size = match render_target {
+            RenderTarget::Fullscreen(initial_size) => initial_size,
+            RenderTarget::TextureBuffer(texture_handle) => todo!(),
+        };
         let eye = Point3::new(0.0, 0.0, -400.0);
         let target = Point3::new(0.0, 0.0, 0.0);
 
@@ -208,6 +220,7 @@ impl Camera {
             auto: false,
             speed,
             sensitivity,
+            render_target,
         };
         camera.update_forward();
         camera
@@ -617,14 +630,26 @@ impl Default for CameraUniform {
     }
 }
 
-pub struct CameraSystem {
+pub struct CameraBuffer {
     pub camera_uniform: CameraUniform,
     pub camera_buffer: Buffer,
-    pub current_user_scene: SceneHandle,
+}
+pub struct CameraSystem {
+    pub cameras: IndexMap<RenderViewHandle, CameraBuffer>,
 }
 
 impl CameraSystem {
-    pub fn new(gfx: &mut Graphics, camera: &Camera) -> Self {
+    pub fn new() -> Self {
+        Self {
+            cameras: IndexMap::default(),
+        }
+    }
+    pub fn new_camera(
+        &mut self,
+        gfx: &mut Graphics,
+        camera: &Camera,
+        render_view_handle: RenderViewHandle,
+    ) {
         let mut camera_uniform = CameraUniform::new();
         let display_to_render_ndc_scale = gfx
             .get_render_context()
@@ -638,21 +663,29 @@ impl CameraSystem {
         );
 
         log::warn!("Shader");
-        Self {
+        let camer_buffer = CameraBuffer {
             camera_buffer,
             camera_uniform,
-            current_user_scene: SceneHandle::default(),
-        }
+        };
+
+        self.cameras.insert(render_view_handle, camer_buffer);
     }
 
-    pub fn update_camera(&mut self, camera: &Camera, rc: &mut RenderContext) {
+    pub fn update_camera(
+        &mut self,
+        camera: &Camera,
+        rc: &mut RenderContext,
+        render_view_handle: &RenderViewHandle,
+    ) {
+        let buffer = self.cameras.get_mut(render_view_handle).unwrap();
         let display_to_render_ndc_scale = rc.post_processing.display_to_render_ndc_scale();
-        self.camera_uniform
+        buffer
+            .camera_uniform
             .update_view_proj(camera, display_to_render_ndc_scale);
         rc.queue.write_buffer(
-            &self.camera_buffer.buffer,
+            &buffer.camera_buffer.buffer,
             0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
+            bytemuck::cast_slice(&[buffer.camera_uniform]),
         );
     }
 }
@@ -685,16 +718,22 @@ pub fn normalize_and_map_camera_height(x: i64, a: i64, b: i64, start: f32, end: 
 }
 
 impl GpuBindableSystem for CameraSystem {
-    fn run(&mut self, world: &mut World, rc: &mut RenderContext, dt: std::time::Duration) {
+    fn run(
+        &mut self,
+        world: &mut World,
+        rc: &mut RenderContext,
+        render: &RenderViewHandle,
+        dt: std::time::Duration,
+    ) {
         world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
             camera.update_camera(dt);
             camera_animator.update(dt.as_secs_f32(), camera);
-            self.update_camera(camera, rc);
+            self.update_camera(camera, rc, render);
         });
     }
 
-    fn get_buffer(&self) -> &Buffer {
-        &self.camera_buffer
+    fn get_buffer(&self, render_view: &RenderViewHandle) -> &Buffer {
+        &self.cameras.get(render_view).unwrap().camera_buffer
     }
 
     fn binding_location(&self) -> (u32, u32) {
@@ -705,13 +744,14 @@ impl GpuBindableSystem for CameraSystem {
         &mut self,
         world: &mut World,
         resources: &mut RenderContext,
+        render_view: &RenderViewHandle,
         dt: std::time::Duration,
         size: PhysicalSize<f32>,
     ) {
         world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, _camera_animator)| {
             camera.resize(size);
             camera.update_camera(dt);
-            self.update_camera(camera, resources);
+            self.update_camera(camera, resources, render_view);
         });
     }
     // fn register(self, resources: &mut crate::core::resource::Resources) {

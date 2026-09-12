@@ -4,6 +4,10 @@ use crate::core::{
     buffer::{Buffer, BufferType, UniformParameters},
     engine::GpuBindableSystem,
     entities::World,
+    render::{
+        render::RenderContext,
+        render_view::{self, RenderViewHandle},
+    },
 };
 
 const MAX_LIGHTS: usize = 16;
@@ -74,16 +78,7 @@ impl LightSystem {
 }
 
 impl GpuBindableSystem for LightSystem {
-    #[allow(unused)]
-    fn run(
-        &mut self,
-        world: &mut World,
-        resources: &mut crate::core::render::RenderContext,
-        dt: std::time::Duration,
-    ) {
-    }
-
-    fn get_buffer(&self) -> &Buffer {
+    fn get_buffer(&self, render_view: &RenderViewHandle) -> &Buffer {
         &self.storage_buffer
     }
 
@@ -95,10 +90,23 @@ impl GpuBindableSystem for LightSystem {
     fn update(
         &mut self,
         world: &mut World,
-        resources: &mut crate::core::render::RenderContext,
+        resources: &mut RenderContext,
+        render_view: &RenderViewHandle,
+
         dt: std::time::Duration,
         size: winit::dpi::PhysicalSize<f32>,
     ) {
+    }
+
+    #[allow(unused)]
+    fn run(
+        &mut self,
+        world: &mut World,
+        resources: &mut RenderContext,
+        render_view: &RenderViewHandle,
+        dt: std::time::Duration,
+    ) {
+        todo!()
     }
 
     // fn register(self, resources: &mut Resources) {

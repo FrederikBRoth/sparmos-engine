@@ -10,7 +10,10 @@ use crate::{
         binding::{BindGroupBuilder, MaterialBindingKey},
         buffer::{Buffer, BufferType, UniformParameters},
         geometry::{VertexBufferLayoutOwned, VertexLayoutKey, VertexType},
-        render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle, RenderContext},
+        render::{
+            render::{ComputeHandle, ComputeRenderingHandle, MaterialHandle, RenderContext},
+            render_view::{self, RenderViewHandle},
+        },
         resource::BufferHandle,
         texture::Texture,
     },
@@ -417,8 +420,8 @@ impl<'a> MaterialBuilder<'a> {
         self
     }
 
-    pub fn build(mut self) -> MaterialHandle {
-        for (group, binding, buffer) in self.graphics.engine.systems.get_bindings() {
+    pub fn build(mut self, render_view: &RenderViewHandle) -> MaterialHandle {
+        for (group, binding, buffer) in self.graphics.engine.systems.get_bindings(render_view) {
             if !self.bindings.contains_buffer(buffer) && !self.bindings.contains(group, binding) {
                 self.bindings.buffer(buffer, group, binding);
             }
@@ -618,7 +621,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> ComputeRenderingHandle {
+    pub fn build(self, render_view: &RenderViewHandle) -> ComputeRenderingHandle {
         let device = &self.graphics.engine.render_context.device;
 
         let shader = self
@@ -640,7 +643,7 @@ impl<'a> ComputeRenderingBuilder<'a> {
         let render_buffer = compute.render_buffer.clone();
         let length = compute.length;
         let mut bindings = BindGroupBuilder::new();
-        let system_bindings = self.graphics.engine.systems.get_bindings();
+        let system_bindings = self.graphics.engine.systems.get_bindings(render_view);
         let mut next_group = system_bindings
             .iter()
             .map(|(group, _, _)| *group)
