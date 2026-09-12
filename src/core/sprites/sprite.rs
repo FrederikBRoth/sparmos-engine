@@ -92,6 +92,8 @@ impl Sprite {
             .from_instances([instance].into())
             .build();
 
-        gfx.add_renderable(material, mesh, instance_controller)
+        let renderable = gfx.add_renderable(material, mesh, instance_controller);
+        gfx.add_entity((renderable,));
+        renderable
     }
 }

@@ -189,6 +189,29 @@ impl Graphics {
         )
     }
 
+    pub fn spawn_physics_for_renderable_in_scene_world(
+        &mut self,
+        world: &mut World,
+        scene: SceneHandle,
+        batch: RenderableHandle,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> Vec<Entity> {
+        let transforms: Vec<Transform> = self
+            .get_instance_controller(batch)
+            .instances()
+            .iter()
+            .map(|instance| instance.transform.clone())
+            .collect();
+        self.spawn_physics_transforms_in_scene_world(
+            scene,
+            world,
+            batch,
+            transforms.into_iter().enumerate().collect(),
+            collider,
+            rigid_body,
+        )
+    }
     pub fn spawn_physics_for_renderable_in_scene(
         &mut self,
         scene: SceneHandle,
@@ -211,6 +234,28 @@ impl Graphics {
         )
     }
 
+    fn spawn_physics_transforms_in_scene_world(
+        &mut self,
+        scene: SceneHandle,
+        world: &mut World,
+        batch: RenderableHandle,
+        transforms: Vec<(usize, Transform)>,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> Vec<Entity> {
+        let bundles = transforms.into_iter().map(|(instance_index, transform)| {
+            (
+                transform,
+                collider.clone(),
+                rigid_body.clone(),
+                RenderInstanceRef {
+                    batch,
+                    instance_index,
+                },
+            )
+        });
+        bundles.map(|bundle| world.add_entity(bundle)).collect()
+    }
     fn spawn_physics_transforms_in_scene(
         &mut self,
         scene: SceneHandle,
@@ -289,6 +334,24 @@ impl Graphics {
         self.add_entity_to_scene(scene, (batch,));
         let entities =
             self.spawn_physics_for_renderable_in_scene(scene, batch, collider, rigid_body);
+        PhysicsRenderBatch { batch, entities }
+    }
+    pub fn add_physics_entity_to_scene_world(
+        &mut self,
+        scene: SceneHandle,
+        world: &mut World,
+        material: MaterialHandle,
+        mesh: MeshHandle,
+        instance_controller: InstanceControllerHandle,
+        collider: Collider,
+        rigid_body: RigidBody,
+    ) -> PhysicsRenderBatch {
+        let batch = self.add_renderable(material, mesh, instance_controller);
+        // The GPU batch is global, while this component declares that the batch
+        // belongs to this scene and must be drawn by its RenderViews.
+        world.add_entity((batch,));
+        let entities = self
+            .spawn_physics_for_renderable_in_scene_world(world, scene, batch, collider, rigid_body);
         PhysicsRenderBatch { batch, entities }
     }
 
@@ -676,7 +739,7 @@ impl Graphics {
     pub fn new_scene(
         &mut self,
         name: &str,
-        callback: impl Fn(&mut Graphics, &mut World),
+        callback: impl Fn(&mut Graphics, &mut World, SceneHandle),
     ) -> SceneHandle {
         assert!(
             !self.scenes.scenes_lookup.contains_key(name),
@@ -696,7 +759,7 @@ impl Graphics {
         let scene = self.scenes.scenes.get(handle).unwrap();
         let world = Rc::clone(&scene.world);
         let mut world = world.borrow_mut();
-        callback(self, &mut world);
+        callback(self, &mut world, handle);
         self.scenes.scenes_lookup.insert(name.to_string(), handle);
         handle
     }

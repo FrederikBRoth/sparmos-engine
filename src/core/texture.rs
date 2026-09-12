@@ -233,6 +233,67 @@ impl TextureDefinition {
         })
     }
 
+    pub fn render_target(
+        device: &wgpu::Device,
+        size: PhysicalSize<u32>,
+        label: Option<&str>,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size: wgpu::Extent3d {
+                width: size.width.max(1),
+                height: size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        Self {
+            texture,
+            view,
+            view_type: TextureViewType::D2,
+            radiance_scale: 1.0,
+        }
+    }
+
+    pub fn depth_target(
+        device: &wgpu::Device,
+        size: PhysicalSize<u32>,
+        label: Option<&str>,
+    ) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size: wgpu::Extent3d {
+                width: size.width.max(1),
+                height: size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Texture::DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        Self {
+            texture,
+            view,
+            view_type: TextureViewType::D2,
+            radiance_scale: 1.0,
+        }
+    }
+
     pub fn from_cubemap(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -1281,6 +1342,24 @@ fn finish_texture(
     textures: Vec<TextureDefinition>,
     sampler_descriptor: &wgpu::SamplerDescriptor,
 ) -> Texture {
+    finish_texture_with_binding(
+        gfx,
+        label,
+        textures,
+        sampler_descriptor,
+        wgpu::TextureSampleType::Float { filterable: true },
+        wgpu::SamplerBindingType::Filtering,
+    )
+}
+
+fn finish_texture_with_binding(
+    gfx: &Graphics,
+    label: &str,
+    textures: Vec<TextureDefinition>,
+    sampler_descriptor: &wgpu::SamplerDescriptor,
+    sample_type: wgpu::TextureSampleType,
+    sampler_binding_type: wgpu::SamplerBindingType,
+) -> Texture {
     let radiance_scale = textures
         .first()
         .map(|texture| texture.radiance_scale)
@@ -1303,8 +1382,8 @@ fn finish_texture(
         texture: textures,
         sampler,
         radiance_scale_buffer,
-        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-        sampler_binding_type: wgpu::SamplerBindingType::Filtering,
+        sample_type,
+        sampler_binding_type,
         visibility: wgpu::ShaderStages::FRAGMENT,
         id: NEXT_TEXTURE_ID.fetch_add(1, Ordering::Relaxed),
     }
@@ -1315,6 +1394,7 @@ pub struct TextureBuilder<'a> {
     pub(crate) textures: Vec<TextureDefinition>,
     pub(crate) label: &'a str,
     pub(crate) linear: bool,
+    pub(crate) depth: bool,
 }
 
 impl<'a> TextureBuilder<'a> {
@@ -1324,6 +1404,7 @@ impl<'a> TextureBuilder<'a> {
             textures: Vec::new(),
             label,
             linear: false,
+            depth: false,
         }
     }
 
@@ -1368,12 +1449,63 @@ impl<'a> TextureBuilder<'a> {
         self
     }
 
+    /// Add an empty 2D color texture that can be rendered into and sampled later.
+    pub fn render_target(mut self, size: PhysicalSize<u32>, format: wgpu::TextureFormat) -> Self {
+        assert!(
+            !self.depth,
+            "color and depth targets cannot share a Texture"
+        );
+        self.textures.push(TextureDefinition::render_target(
+            self.gfx.get_device(),
+            size,
+            Some(self.label),
+            format,
+        ));
+        self
+    }
+
+    /// Add an empty Depth32Float texture for a texture-backed RenderView.
+    pub fn depth_target(mut self, size: PhysicalSize<u32>) -> Self {
+        assert!(
+            self.textures.is_empty(),
+            "color and depth targets cannot share a Texture"
+        );
+        self.depth = true;
+        self.textures.push(TextureDefinition::depth_target(
+            self.gfx.get_device(),
+            size,
+            Some(self.label),
+        ));
+        self
+    }
+
     pub fn linear(mut self) -> Self {
         self.linear = true;
         self
     }
 
     pub fn build(self) -> Texture {
+        if self.depth {
+            return finish_texture_with_binding(
+                self.gfx,
+                self.label,
+                self.textures,
+                &wgpu::SamplerDescriptor {
+                    address_mode_u: wgpu::AddressMode::ClampToEdge,
+                    address_mode_v: wgpu::AddressMode::ClampToEdge,
+                    address_mode_w: wgpu::AddressMode::ClampToEdge,
+                    mag_filter: wgpu::FilterMode::Linear,
+                    min_filter: wgpu::FilterMode::Linear,
+                    mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+                    compare: Some(wgpu::CompareFunction::LessEqual),
+                    anisotropy_clamp: 1,
+                    ..Default::default()
+                },
+                wgpu::TextureSampleType::Depth,
+                wgpu::SamplerBindingType::Comparison,
+            );
+        }
+
         let sampler_descripton = if self.linear {
             &wgpu::SamplerDescriptor {
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
