@@ -347,6 +347,7 @@ impl State {
 
     pub(crate) fn begin_frame(&mut self, dt: std::time::Duration) {
         self.graphics.engine.engine_time.update_time(dt, true);
+        self.graphics.update_view_cameras(dt);
     }
 
     pub(crate) fn update_scenes(&mut self, dt: std::time::Duration) {
@@ -670,6 +671,7 @@ fn render_view_scene(
         &graphics.engine,
         &scene.world.borrow(),
         graphics.engine.systems.view_bind_groups(handle),
+        render_view.render_mask,
     );
 }
 
