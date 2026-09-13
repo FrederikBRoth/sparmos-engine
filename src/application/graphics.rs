@@ -38,6 +38,7 @@ use crate::{
     entities::meshes::Meshes,
     systems::{
         animation::AnimationHandler,
+        camera::Camera,
         compute::{ComputeBuilder, ReadbackState},
     },
 };
@@ -673,6 +674,46 @@ impl Graphics {
             .insert(texture)
     }
 
+    pub fn get_texture(&self, handle: TextureHandle) -> &Texture {
+        self.engine
+            .render_context
+            .gpu_objects
+            .textures
+            .get(handle)
+            .expect("invalid TextureHandle")
+    }
+
+    /// Creates a sampleable color target and, by default, its private depth target.
+    pub fn create_texture_render_target(
+        &mut self,
+        label: &str,
+        config: render_view::TextureRenderTargetConfig,
+    ) -> render_view::RenderTarget {
+        assert!(
+            config.size.width > 0 && config.size.height > 0,
+            "render target dimensions must be non-zero"
+        );
+        assert!(
+            !config.format.is_depth_stencil_format(),
+            "a color render target requires a color format"
+        );
+
+        let color_label = format!("{label}_color");
+        let color = self
+            .texture(&color_label)
+            .render_target(config.size, config.format)
+            .build();
+        let color_handle = self.add_texture(color);
+
+        let depth = config.depth_enabled.then(|| {
+            let depth_label = format!("{label}_depth");
+            let texture = self.texture(&depth_label).depth_target(config.size).build();
+            (self.add_texture(texture), 0)
+        });
+
+        render_view::RenderTarget::texture(color_handle, 0, depth, config.size, config.format)
+    }
+
     pub fn pbr_texture<'a>(&'a mut self, label: &'a str) -> PbrTextureBuilder<'a> {
         PbrTextureBuilder::new(self, label)
     }
@@ -778,6 +819,20 @@ impl Graphics {
         self.render_views.new_view(target, scene, name, role)
     }
 
+    pub fn new_render_view_with_camera(
+        &mut self,
+        name: impl Into<String>,
+        scene: SceneHandle,
+        target: render_view::RenderTarget,
+        role: render_view::RenderViewRole,
+        camera: Camera,
+    ) -> RenderViewHandle {
+        assert!(
+            self.scenes.scenes.contains_key(scene),
+            "invalid SceneHandle"
+        );
+        self.render_views.new_view(target, scene, name, role)
+    }
     pub fn set_render_view_scene(&mut self, view: RenderViewHandle, scene: SceneHandle) {
         assert!(
             self.scenes.scenes.contains_key(scene),

@@ -18,9 +18,31 @@ use crate::{
     systems::compute::Compute,
 };
 
+pub(crate) struct WindowRenderTargetResources {
+    pub depth: TextureDepth,
+    pub overscan_depth: TextureDepth,
+}
+
+impl WindowRenderTargetResources {
+    pub(crate) fn new(device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) -> Self {
+        let overscan_size = PostProcessHandler::overscan_size(size);
+        Self {
+            depth: Texture::create_depth_texture(device, &size, "window_depth_texture"),
+            overscan_depth: Texture::create_depth_texture(
+                device,
+                &overscan_size,
+                "post_process_scene_depth_texture",
+            ),
+        }
+    }
+
+    pub(crate) fn resize(&mut self, device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) {
+        *self = Self::new(device, size);
+    }
+}
+
 pub struct RenderContext {
-    pub(crate) depth_texture: TextureDepth,
-    pub(crate) overscan_depth_texture: TextureDepth,
+    pub(crate) window_targets: WindowRenderTargetResources,
     pub shaders: HashMap<String, ShaderModule>,
     pub device: Arc<wgpu::Device>, // Logical GPU device
     pub queue: Arc<wgpu::Queue>,   // Command queue for GPU

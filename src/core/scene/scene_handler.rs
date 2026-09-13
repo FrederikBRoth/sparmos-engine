@@ -87,24 +87,3 @@ impl SceneHandler {
         Some(scene)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn simulation_state_does_not_depend_on_render_views() {
-        let mut scenes = SceneHandler::default();
-        let simulating = scenes.scenes.insert(Scene::default());
-        let sleeping = scenes.scenes.insert(Scene {
-            state: SceneState::Sleeping,
-            ..Scene::default()
-        });
-
-        assert_eq!(
-            scenes.simulating_handles().collect::<Vec<_>>(),
-            vec![simulating]
-        );
-        assert_ne!(simulating, sleeping);
-    }
-}

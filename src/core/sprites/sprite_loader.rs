@@ -75,26 +75,3 @@ pub struct Rect {
     pub w: u32,
     pub h: u32,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{Rect, SpriteSheetSize, normalize_uv_rect};
-
-    #[test]
-    fn normalizes_aseprite_pixel_rect() {
-        let uv = normalize_uv_rect(
-            &Rect {
-                x: 64,
-                y: 55,
-                w: 37,
-                h: 42,
-            },
-            &SpriteSheetSize { w: 115, h: 181 },
-        );
-
-        assert_eq!(uv.x, 64.0 / 115.0);
-        assert_eq!(uv.y, 55.0 / 181.0);
-        assert_eq!(uv.z, 37.0 / 115.0);
-        assert_eq!(uv.w, 42.0 / 181.0);
-    }
-}

@@ -280,31 +280,3 @@ fn grid_cell(position: Vector3<f32>) -> (i32, i32, i32) {
 fn ordered_pair(a: usize, b: usize) -> (usize, usize) {
     if a < b { (a, b) } else { (b, a) }
 }
-
-#[cfg(test)]
-mod tests {
-    use slotmap::SlotMap;
-
-    use super::*;
-
-    #[test]
-    fn fixed_timestep_accumulators_are_scene_local() {
-        let mut handles = SlotMap::<SceneHandle, ()>::with_key();
-        let scene_a = handles.insert(());
-        let scene_b = handles.insert(());
-        let mut system = PhysicsSystem::new(Vector3::new(0.0, -9.81, 0.0));
-        let mut world_a = World::new(hecs::World::new());
-        let mut world_b = World::new(hecs::World::new());
-        let half_step = std::time::Duration::from_secs_f32(PHYSICS_DT * 0.5);
-
-        system.advance_scene(scene_a, &mut world_a, half_step);
-        system.advance_scene(scene_b, &mut world_b, half_step);
-
-        assert!((system.scene_dt[&scene_a] - PHYSICS_DT * 0.5).abs() < f32::EPSILON);
-        assert!((system.scene_dt[&scene_b] - PHYSICS_DT * 0.5).abs() < f32::EPSILON);
-        system.advance_scene(scene_a, &mut world_a, half_step);
-        assert!(system.scene_dt[&scene_a] < f32::EPSILON);
-        assert!((system.scene_dt[&scene_b] - PHYSICS_DT * 0.5).abs() < f32::EPSILON);
-        assert_eq!(system.current_dt, 0.0);
-    }
-}

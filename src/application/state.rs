@@ -20,11 +20,12 @@ use crate::core::engine::{Arguments, Engine, EngineCommandQueue, EngineTime, Sys
 use crate::core::entities::World;
 
 use crate::core::post_processing::PostProcessHandler;
-use crate::core::render::render::{ComputeHandle, DrawMesh, GpuObjects, RenderContext};
-use crate::core::render::render_view::{RenderTarget, RenderViewHandler, RenderViewRole};
+use crate::core::render::render::{
+    ComputeHandle, DrawMesh, GpuObjects, RenderContext, WindowRenderTargetResources,
+};
+use crate::core::render::render_view::{RenderViewHandle, RenderViewHandler, ResolvedRenderTarget};
 use crate::core::resource::Resources;
 use crate::core::scene::scene_handler::SceneHandler;
-use crate::core::texture::Texture;
 
 use crate::systems::camera::CameraSystem;
 use crate::systems::compute::ReadbackState;
@@ -199,14 +200,8 @@ impl State {
         };
         let post_processing = PostProcessHandler::new(Arc::clone(&device), Arc::clone(&queue));
 
-        let overscan_size = PostProcessHandler::overscan_size(size);
         let render_context = RenderContext {
-            depth_texture: Texture::create_depth_texture(&device, &size, "depth_texture_primitive"),
-            overscan_depth_texture: Texture::create_depth_texture(
-                &device,
-                &overscan_size,
-                "overscan_depth_texture",
-            ),
+            window_targets: WindowRenderTargetResources::new(&device, size),
             shaders: HashMap::new(),
             device: Arc::clone(&device),
             queue: Arc::clone(&queue),
@@ -302,26 +297,10 @@ impl State {
             // if let Some(game_loop) = self.game_loop.as_mut() {
             //     game_loop.resize(&self.render_context.config);
             // }
-            let overscan_size = PostProcessHandler::overscan_size(new_size);
-
-            self.graphics.get_render_context_mut().depth_texture = Texture::create_depth_texture(
-                self.graphics.get_device(),
-                &new_size,
-                "depth_texture_primitive",
-            );
-            self.graphics
-                .get_render_context_mut()
-                .overscan_depth_texture = Texture::create_depth_texture(
-                self.graphics.get_device(),
-                &overscan_size,
-                "overscan_depth_texture",
-            );
-
-            self.graphics
-                .engine
-                .render_context
-                .post_processing
-                .resize(new_size);
+            let device = Arc::clone(&self.graphics.engine.render_context.device);
+            let render_context = self.graphics.get_render_context_mut();
+            render_context.window_targets.resize(&device, new_size);
+            render_context.post_processing.resize(new_size);
 
             for (_, view) in self
                 .graphics
@@ -339,18 +318,16 @@ impl State {
         }
     }
     pub fn input(&mut self, event: &WindowEvent, game: &mut Box<dyn Game>) {
-        let main_view =
-            self.graphics
-                .render_views
-                .views
-                .iter_mut()
-                .find_map(|(handle, render_view)| {
-                    (render_view.enabled
-                        && render_view.role == RenderViewRole::Main
-                        && render_view.render_target.is_window())
-                    .then_some(render_view)
-                });
-        main_view.unwrap().camera.process_events(event);
+        let presenting_view = self
+            .graphics
+            .render_views
+            .presenting_handle()
+            .expect("no enabled main window RenderView");
+        self.graphics
+            .render_views
+            .get_render_view_mut(presenting_view)
+            .camera
+            .process_events(event);
         let size_f: PhysicalSize<f32> =
             PhysicalSize::new(self.size.width as f32, self.size.height as f32);
         let world = self.graphics.get_world();
@@ -451,88 +428,20 @@ impl State {
                     }
                 }
 
-                let auxiliary_views = self
+                let offscreen_views = self
                     .graphics
                     .render_views
-                    .views
-                    .iter()
-                    .filter_map(|(handle, render_view)| {
-                        (render_view.enabled && render_view.role == RenderViewRole::Auxiliary)
-                            .then_some(handle)
-                    })
+                    .enabled_offscreen_handles()
                     .collect::<Vec<_>>();
-                for handle in auxiliary_views {
+                for handle in offscreen_views {
                     let render_view = &self.graphics.render_views.views[handle];
-                    let RenderTarget::Texture {
-                        texture,
-                        view_index,
-                        depth_texture,
-                        size,
-                        ..
-                    } = &render_view.render_target
-                    else {
-                        continue;
-                    };
-                    let scene = self
-                        .graphics
-                        .scenes
-                        .get(render_view.scene)
-                        .expect("RenderView references a deleted scene");
-                    let textures = &self.graphics.engine.render_context.gpu_objects.textures;
-                    let target_view = &textures[*texture].texture[*view_index].view;
-                    let resolved_depth =
-                        depth_texture.map(|(handle, index)| &textures[handle].texture[index].view);
-                    let depth_attachment =
-                        resolved_depth.map(|depth_view| wgpu::RenderPassDepthStencilAttachment {
-                            view: depth_view,
-                            depth_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(1.0),
-                                store: wgpu::StoreOp::Store,
-                            }),
-                            stencil_ops: None,
-                        });
-                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("Auxiliary RenderView Pass"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: target_view,
-                            depth_slice: None,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: depth_attachment,
-                        ..Default::default()
-                    });
-                    render_pass.set_viewport(
-                        0.0,
-                        0.0,
-                        size.width as f32,
-                        size.height as f32,
-                        0.0,
-                        1.0,
-                    );
-                    render_pass.set_scissor_rect(0, 0, size.width, size.height);
-                    render_pass.draw_scene(
-                        &self.backend,
-                        &self.graphics.engine,
-                        &scene.world.borrow(),
-                        self.graphics.engine.systems.view_bind_groups(handle),
-                    );
+                    let target = render_view
+                        .render_target
+                        .resolve(&self.graphics.engine.render_context, None);
+                    render_view_scene(&mut encoder, &self.backend, &self.graphics, handle, target);
                 }
 
-                let main_view =
-                    self.graphics
-                        .render_views
-                        .views
-                        .iter()
-                        .find_map(|(handle, render_view)| {
-                            (render_view.enabled
-                                && render_view.role == RenderViewRole::Main
-                                && render_view.render_target.is_window())
-                            .then_some(handle)
-                        });
+                let main_view = self.graphics.render_views.presenting_handle();
 
                 if !self
                     .graphics
@@ -552,52 +461,19 @@ impl State {
                         .peekable();
 
                     let mut current_post_process = post_processes.peek().unwrap().1;
-                    {
-                        let mut render_pass =
-                            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("Main Render Pass"),
-                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                    view: &current_post_process.view,
-                                    depth_slice: None,
-                                    resolve_target: None,
-                                    ops: wgpu::Operations {
-                                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                        store: wgpu::StoreOp::Store,
-                                    },
-                                })],
-                                depth_stencil_attachment: Some(
-                                    wgpu::RenderPassDepthStencilAttachment {
-                                        view: &self
-                                            .graphics
-                                            .engine
-                                            .render_context
-                                            .overscan_depth_texture
-                                            .view,
-                                        depth_ops: Some(wgpu::Operations {
-                                            load: wgpu::LoadOp::Clear(1.0),
-                                            store: wgpu::StoreOp::Store,
-                                        }),
-                                        stencil_ops: None,
-                                    },
-                                ),
-                                occlusion_query_set: None,
-                                timestamp_writes: None,
-                                ..Default::default()
-                            });
-                        if let Some(handle) = main_view {
-                            let render_view = &self.graphics.render_views.views[handle];
-                            let scene = self
-                                .graphics
-                                .scenes
-                                .get(render_view.scene)
-                                .expect("RenderView references a deleted scene");
-                            render_pass.draw_scene(
-                                &self.backend,
-                                &self.graphics.engine,
-                                &scene.world.borrow(),
-                                self.graphics.engine.systems.view_bind_groups(handle),
-                            );
-                        }
+                    if let Some(handle) = main_view {
+                        let target = ResolvedRenderTarget::post_process_scene(
+                            &self.graphics.engine.render_context,
+                            &current_post_process.view,
+                            current_post_process.format,
+                        );
+                        render_view_scene(
+                            &mut encoder,
+                            &self.backend,
+                            &self.graphics,
+                            handle,
+                            target,
+                        );
                     }
 
                     while let Some((_, post_process)) = post_processes.next() {
@@ -669,55 +545,12 @@ impl State {
                     );
                     post_pass.set_scissor_rect(0, 0, self.size.width, self.size.height);
                     post_pass.draw(0..3, 0..1); // fullscreen triangle
-                } else {
-                    {
-                        let mut render_pass =
-                            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("Render Pass"),
-                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                    view: &view,
-                                    depth_slice: None,
-                                    resolve_target: None,
-                                    ops: wgpu::Operations {
-                                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                        store: wgpu::StoreOp::Store,
-                                    },
-                                })],
-                                depth_stencil_attachment: Some(
-                                    wgpu::RenderPassDepthStencilAttachment {
-                                        view: &self
-                                            .graphics
-                                            .engine
-                                            .render_context
-                                            .depth_texture
-                                            .view,
-                                        depth_ops: Some(wgpu::Operations {
-                                            load: wgpu::LoadOp::Clear(1.0),
-                                            store: wgpu::StoreOp::Store,
-                                        }),
-                                        stencil_ops: None,
-                                    },
-                                ),
-                                occlusion_query_set: None,
-                                timestamp_writes: None,
-                                ..Default::default()
-                            });
-
-                        if let Some(handle) = main_view {
-                            let render_view = &self.graphics.render_views.views[handle];
-                            let scene = self
-                                .graphics
-                                .scenes
-                                .get(render_view.scene)
-                                .expect("RenderView references a deleted scene");
-                            render_pass.draw_scene(
-                                &self.backend,
-                                &self.graphics.engine,
-                                &scene.world.borrow(),
-                                self.graphics.engine.systems.view_bind_groups(handle),
-                            );
-                        }
-                    }
+                } else if let Some(handle) = main_view {
+                    let render_view = &self.graphics.render_views.views[handle];
+                    let target = render_view
+                        .render_target
+                        .resolve(&self.graphics.engine.render_context, Some(&view));
+                    render_view_scene(&mut encoder, &self.backend, &self.graphics, handle, target);
                 }
 
                 #[cfg(feature = "gui")]
@@ -780,6 +613,64 @@ impl State {
             CurrentSurfaceTexture::Validation => (),
         }
     }
+}
+
+fn render_view_scene(
+    encoder: &mut wgpu::CommandEncoder,
+    backend: &DeviceBackend,
+    graphics: &Graphics,
+    handle: RenderViewHandle,
+    target: ResolvedRenderTarget<'_>,
+) {
+    debug_assert!(target.size.width > 0 && target.size.height > 0);
+    debug_assert!(
+        !target.format.is_depth_stencil_format(),
+        "a scene color target cannot use a depth/stencil format"
+    );
+    let render_view = &graphics.render_views.views[handle];
+    let scene = graphics
+        .scenes
+        .get(render_view.scene)
+        .expect("RenderView references a deleted scene");
+    let depth_attachment = target
+        .depth
+        .map(|depth| wgpu::RenderPassDepthStencilAttachment {
+            view: depth,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        });
+    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("RenderView Scene Pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target.color,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: depth_attachment,
+        ..Default::default()
+    });
+    render_pass.set_viewport(
+        0.0,
+        0.0,
+        target.size.width as f32,
+        target.size.height as f32,
+        0.0,
+        1.0,
+    );
+    render_pass.set_scissor_rect(0, 0, target.size.width, target.size.height);
+    render_pass.draw_scene(
+        backend,
+        &graphics.engine,
+        &scene.world.borrow(),
+        graphics.engine.systems.view_bind_groups(handle),
+    );
 }
 
 pub fn map_value(value: f32, old_min: f32, old_max: f32, new_max: f32, new_min: f32) -> f32 {

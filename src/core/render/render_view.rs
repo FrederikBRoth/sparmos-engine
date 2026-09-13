@@ -4,12 +4,71 @@ use slotmap::{SlotMap, new_key_type};
 use winit::dpi::PhysicalSize;
 
 use crate::{
-    core::{render::render::TextureHandle, scene::scene_handler::SceneHandle},
+    core::{
+        render::render::{RenderContext, TextureHandle},
+        scene::scene_handler::SceneHandle,
+    },
     systems::camera::{Camera, CameraAnimator},
 };
 
+pub(crate) struct ResolvedRenderTarget<'a> {
+    pub color: &'a wgpu::TextureView,
+    pub depth: Option<&'a wgpu::TextureView>,
+    pub size: PhysicalSize<u32>,
+    pub format: wgpu::TextureFormat,
+}
+
+impl<'a> ResolvedRenderTarget<'a> {
+    pub(crate) fn post_process_scene(
+        render_context: &'a RenderContext,
+        color: &'a wgpu::TextureView,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        Self {
+            color,
+            depth: Some(&render_context.window_targets.overscan_depth.view),
+            size: crate::core::post_processing::PostProcessHandler::overscan_size(
+                PhysicalSize::new(render_context.config.width, render_context.config.height),
+            ),
+            format,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct TextureRenderTargetConfig {
+    pub size: PhysicalSize<u32>,
+    pub format: wgpu::TextureFormat,
+    pub depth_enabled: bool,
+}
+
+impl TextureRenderTargetConfig {
+    pub fn new(size: PhysicalSize<u32>, format: wgpu::TextureFormat) -> Self {
+        Self {
+            size,
+            format,
+            depth_enabled: true,
+        }
+    }
+
+    pub fn without_depth(mut self) -> Self {
+        self.depth_enabled = false;
+        self
+    }
+
+    pub fn depth_enabled(mut self, enabled: bool) -> Self {
+        self.depth_enabled = enabled;
+        self
+    }
+}
+
 #[derive(Clone)]
-pub enum RenderTarget {
+pub struct RenderTarget {
+    kind: RenderTargetKind,
+}
+
+#[derive(Clone)]
+enum RenderTargetKind {
     Window {
         size: PhysicalSize<u32>,
     },
@@ -24,43 +83,101 @@ pub enum RenderTarget {
 
 impl RenderTarget {
     pub fn window(size: PhysicalSize<u32>) -> Self {
-        Self::Window { size }
+        Self {
+            kind: RenderTargetKind::Window { size },
+        }
     }
 
-    pub fn texture(
+    pub(crate) fn texture(
         texture: TextureHandle,
         view_index: usize,
         depth_texture: Option<(TextureHandle, usize)>,
         size: PhysicalSize<u32>,
         format: wgpu::TextureFormat,
     ) -> Self {
-        Self::Texture {
-            texture,
-            view_index,
-            depth_texture,
-            size,
-            format,
+        Self {
+            kind: RenderTargetKind::Texture {
+                texture,
+                view_index,
+                depth_texture,
+                size,
+                format,
+            },
+        }
+    }
+
+    pub fn color_texture(&self) -> Option<TextureHandle> {
+        match &self.kind {
+            RenderTargetKind::Texture { texture, .. } => Some(*texture),
+            RenderTargetKind::Window { .. } => None,
         }
     }
 
     pub fn size(&self) -> PhysicalSize<u32> {
-        match self {
-            Self::Window { size } | Self::Texture { size, .. } => *size,
+        match &self.kind {
+            RenderTargetKind::Window { size } | RenderTargetKind::Texture { size, .. } => *size,
         }
     }
 
     pub fn resize_window(&mut self, new_size: PhysicalSize<u32>) -> bool {
-        match self {
-            Self::Window { size } => {
+        match &mut self.kind {
+            RenderTargetKind::Window { size } => {
                 *size = new_size;
                 true
             }
-            Self::Texture { .. } => false,
+            RenderTargetKind::Texture { .. } => false,
         }
     }
 
     pub fn is_window(&self) -> bool {
-        matches!(self, Self::Window { .. })
+        matches!(&self.kind, RenderTargetKind::Window { .. })
+    }
+
+    pub(crate) fn resolve<'a>(
+        &'a self,
+        render_context: &'a RenderContext,
+        surface_view: Option<&'a wgpu::TextureView>,
+    ) -> ResolvedRenderTarget<'a> {
+        match &self.kind {
+            RenderTargetKind::Window { size } => ResolvedRenderTarget {
+                color: surface_view.expect("a window RenderTarget requires a surface view"),
+                depth: Some(&render_context.window_targets.depth.view),
+                size: *size,
+                format: render_context.config.format,
+            },
+            RenderTargetKind::Texture {
+                texture,
+                view_index,
+                depth_texture,
+                size,
+                format,
+            } => {
+                let textures = &render_context.gpu_objects.textures;
+                let color_texture = textures
+                    .get(*texture)
+                    .expect("RenderTarget references a deleted color texture");
+                let color = &color_texture
+                    .texture
+                    .get(*view_index)
+                    .expect("RenderTarget color view index is out of bounds")
+                    .view;
+                let depth = depth_texture.map(|(handle, index)| {
+                    &textures
+                        .get(handle)
+                        .expect("RenderTarget references a deleted depth texture")
+                        .texture
+                        .get(index)
+                        .expect("RenderTarget depth view index is out of bounds")
+                        .view
+                });
+                ResolvedRenderTarget {
+                    color,
+                    depth,
+                    size: *size,
+                    format: *format,
+                }
+            }
+        }
     }
 }
 
@@ -128,12 +245,23 @@ impl RenderViewHandler {
         name: impl Into<String>,
         role: RenderViewRole,
     ) -> RenderViewHandle {
+        let camera = Camera::new(render_target.size(), 75.0, 50.0);
+        self.new_view_with_camera(render_target, scene, name, role, camera)
+    }
+    pub(crate) fn new_view_with_camera(
+        &mut self,
+        render_target: RenderTarget,
+        scene: SceneHandle,
+        name: impl Into<String>,
+        role: RenderViewRole,
+        camera: Camera,
+    ) -> RenderViewHandle {
         let name = name.into();
         assert!(
             !self.view_lookup.contains_key(&name),
             "RenderView name '{name}' is already in use"
         );
-        let camera = Camera::new(render_target.clone(), 75.0, 50.0);
+        let camera = Camera::new(render_target.size(), 75.0, 50.0);
         let handle = self.views.insert(RenderView {
             scene,
             camera,
@@ -162,6 +290,19 @@ impl RenderViewHandler {
         self.views
             .iter()
             .filter_map(|(handle, view)| view.enabled.then_some(handle))
+    }
+
+    pub(crate) fn enabled_offscreen_handles(&self) -> impl Iterator<Item = RenderViewHandle> + '_ {
+        self.views.iter().filter_map(|(handle, view)| {
+            (view.enabled && !view.render_target.is_window()).then_some(handle)
+        })
+    }
+
+    pub(crate) fn presenting_handle(&self) -> Option<RenderViewHandle> {
+        self.views.iter().find_map(|(handle, view)| {
+            (view.enabled && view.role == RenderViewRole::Main && view.render_target.is_window())
+                .then_some(handle)
+        })
     }
 
     pub(crate) fn remove(&mut self, handle: RenderViewHandle) -> Option<RenderView> {

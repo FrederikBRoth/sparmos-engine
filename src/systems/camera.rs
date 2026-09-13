@@ -15,7 +15,7 @@ use crate::{
         engine::ViewSystem,
         render::{
             render::RenderContext,
-            render_view::{RenderTarget, RenderView, RenderViewHandle, RenderViewRole},
+            render_view::{RenderView, RenderViewHandle},
         },
     },
     systems::animation::{AnimationHandler, AnimationType},
@@ -36,7 +36,7 @@ pub struct CameraAnimator {
     pub target_animator: AnimationHandler,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum MovementPress {
     Pressed,
     NotPressed,
@@ -118,6 +118,7 @@ impl CameraAnimator {
             .reset_point_position_to_current_position(&mut camera.target);
     }
 }
+#[derive(Clone, Copy)]
 pub enum CameraMode {
     Free,
     Animated,
@@ -137,6 +138,7 @@ impl Default for CameraProjection {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Camera {
     pub eye: cgmath::Point3<f32>,
     pub target: cgmath::Point3<f32>,
@@ -172,8 +174,7 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new(render_target: RenderTarget, speed: f32, sensitivity: f32) -> Self {
-        let size = render_target.size();
+    pub fn new(size: PhysicalSize<u32>, speed: f32, sensitivity: f32) -> Self {
         let screen_size = PhysicalSize::new(size.width as f32, size.height as f32);
         let eye = Point3::new(0.0, 0.0, -400.0);
         let target = Point3::new(0.0, 0.0, 0.0);
@@ -760,7 +761,7 @@ impl ViewSystem for CameraSystem {
 }
 
 fn view_ndc_scale(view: &RenderView, rc: &RenderContext) -> f32 {
-    if view.role == RenderViewRole::Main && view.render_target.is_window() {
+    if view.render_target.is_window() {
         rc.post_processing.display_to_render_ndc_scale()
     } else {
         1.0
