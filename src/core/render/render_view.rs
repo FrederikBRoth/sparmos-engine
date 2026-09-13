@@ -8,7 +8,7 @@ use crate::{
         render::render::{RenderContext, TextureHandle},
         scene::scene_handler::SceneHandle,
     },
-    systems::camera::{Camera, CameraAnimator},
+    systems::camera::{Camera, CameraAnimator, ClipPlane},
 };
 
 pub(crate) struct ResolvedRenderTarget<'a> {
@@ -133,6 +133,40 @@ impl RenderTarget {
         matches!(&self.kind, RenderTargetKind::Window { .. })
     }
 
+    /// Reallocate a texture target, retaining its color/depth handles.
+    /// Materials sampling it must be rebound with Graphics::set_material_texture.
+    /// Cloned targets and externally retained texture views are not resized.
+    pub fn resize_texture(
+        &mut self,
+        gfx: &mut crate::application::graphics::Graphics,
+        new_size: PhysicalSize<u32>,
+    ) -> bool {
+        assert!(new_size.width > 0 && new_size.height > 0);
+        let RenderTargetKind::Texture {
+            texture,
+            depth_texture,
+            size,
+            format,
+            ..
+        } = &mut self.kind
+        else {
+            return false;
+        };
+        if *size == new_size {
+            return false;
+        }
+        let label = gfx.get_texture(*texture).label.clone();
+        let color = gfx.texture(&label).render_target(new_size, *format).build();
+        gfx.engine.render_context.gpu_objects.textures[*texture] = color;
+        if let Some((handle, _)) = depth_texture {
+            let label = gfx.get_texture(*handle).label.clone();
+            let depth = gfx.texture(&label).depth_target(new_size).build();
+            gfx.engine.render_context.gpu_objects.textures[*handle] = depth;
+        }
+        *size = new_size;
+        true
+    }
+
     pub(crate) fn resolve<'a>(
         &'a self,
         render_context: &'a RenderContext,
@@ -195,6 +229,35 @@ pub struct RenderView {
     pub render_target: RenderTarget,
     pub enabled: bool,
     pub role: RenderViewRole,
+    pub render_mask: RenderMask,
+    pub clip_plane: Option<ClipPlane>,
+    /// False for cameras whose complete pose is supplied by game logic.
+    pub simulate_camera: bool,
+}
+
+/// Optional ECS draw layer. Untagged registrations use the ordinary world layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RenderLayer(pub u32);
+
+impl Default for RenderLayer {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RenderMask(pub u32);
+
+impl Default for RenderMask {
+    fn default() -> Self {
+        Self(u32::MAX)
+    }
+}
+
+impl RenderMask {
+    pub fn includes(self, layer: Option<&RenderLayer>) -> bool {
+        self.0 & layer.copied().unwrap_or_default().0 != 0
+    }
 }
 
 impl RenderView {
@@ -254,14 +317,15 @@ impl RenderViewHandler {
         scene: SceneHandle,
         name: impl Into<String>,
         role: RenderViewRole,
-        camera: Camera,
+        mut camera: Camera,
     ) -> RenderViewHandle {
         let name = name.into();
         assert!(
             !self.view_lookup.contains_key(&name),
             "RenderView name '{name}' is already in use"
         );
-        let camera = Camera::new(render_target.size(), 75.0, 50.0);
+        let size = render_target.size();
+        camera.resize(PhysicalSize::new(size.width as f32, size.height as f32));
         let handle = self.views.insert(RenderView {
             scene,
             camera,
@@ -269,6 +333,9 @@ impl RenderViewHandler {
             render_target,
             enabled: true,
             role,
+            render_mask: RenderMask::default(),
+            clip_plane: None,
+            simulate_camera: true,
         });
         self.view_lookup.insert(name, handle);
         handle
@@ -276,6 +343,18 @@ impl RenderViewHandler {
 
     pub fn set_enabled(&mut self, handle: RenderViewHandle, enabled: bool) {
         self.get_render_view_mut(handle).enabled = enabled;
+    }
+
+    pub(crate) fn update_cameras(&mut self, dt: std::time::Duration) {
+        for (_, view) in self.views.iter_mut() {
+            if !view.enabled || !view.simulate_camera {
+                continue;
+            }
+            view.camera.update_camera(dt);
+            if let Some(animator) = &mut view.camera_animator {
+                animator.update(dt.as_secs_f32(), &mut view.camera);
+            }
+        }
     }
 
     pub fn set_role(&mut self, handle: RenderViewHandle, role: RenderViewRole) {

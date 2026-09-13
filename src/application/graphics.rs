@@ -777,6 +777,31 @@ impl Graphics {
         handle
     }
 
+    /// Rebind an existing material in place, including all its draw registrations.
+    /// Useful after resizing a sampled render target. Keeps the pipeline and handle.
+    pub fn set_material_texture(
+        &mut self,
+        handle: MaterialHandle,
+        texture: &Texture,
+        group: u32,
+        start_binding: u32,
+    ) {
+        let rc = &mut self.engine.render_context;
+        let material = rc.gpu_objects.materials[handle].with_texture(
+            &rc.device,
+            texture,
+            group,
+            start_binding,
+        );
+        rc.gpu_objects
+            .material_lookup
+            .retain(|_, value| *value != handle);
+        rc.gpu_objects
+            .material_lookup
+            .insert(material.key.clone(), handle);
+        rc.gpu_objects.materials[handle] = material;
+    }
+
     pub fn new_scene(
         &mut self,
         name: &str,
@@ -831,7 +856,13 @@ impl Graphics {
             self.scenes.scenes.contains_key(scene),
             "invalid SceneHandle"
         );
-        self.render_views.new_view(target, scene, name, role)
+        self.render_views
+            .new_view_with_camera(target, scene, name, role, camera)
+    }
+
+    /// Advance ordinary cameras before game logic derives dependent views.
+    pub fn update_view_cameras(&mut self, dt: Duration) {
+        self.render_views.update_cameras(dt);
     }
     pub fn set_render_view_scene(&mut self, view: RenderViewHandle, scene: SceneHandle) {
         assert!(

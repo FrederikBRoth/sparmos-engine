@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use super::render_view::{RenderLayer, RenderMask};
 use slotmap::{SlotMap, new_key_type};
 use wgpu::ShaderModule;
 
@@ -101,10 +102,14 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
         engine: &Engine,
         world: &World,
         view_bind_groups: &[Option<wgpu::BindGroup>],
+        render_mask: RenderMask,
     ) {
         let scene = &engine.render_context.gpu_objects;
-        world.query::<&Model>(|mut query| {
-            for model in query.iter() {
+        world.query::<(&Model, Option<&RenderLayer>)>(|mut query| {
+            for (model, layer) in query.iter() {
+                if !render_mask.includes(layer) {
+                    continue;
+                }
                 let instance_controller = &scene.instance_controllers[model.instance];
 
                 for (mesh, _) in model.meshes.iter().cloned() {
@@ -134,8 +139,11 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
             }
         });
 
-        world.query::<&RenderableHandle>(|mut query| {
-            for renderable_handle in query.iter() {
+        world.query::<(&RenderableHandle, Option<&RenderLayer>)>(|mut query| {
+            for (renderable_handle, layer) in query.iter() {
+                if !render_mask.includes(layer) {
+                    continue;
+                }
                 let renderable = &engine.render_context.gpu_objects.renderables[*renderable_handle];
                 let mesh = &scene.meshes[renderable.mesh_handle];
                 let material = &scene.materials[renderable.material_handle];
@@ -164,7 +172,10 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
                 );
             }
         });
-        world.query_first::<&mut SkyboxRenderable>(|skybox| {
+        world.query_first::<(&SkyboxRenderable, Option<&RenderLayer>)>(|(skybox, layer)| {
+            if !render_mask.includes(layer) {
+                return;
+            }
             let material = &scene.materials[skybox.material_handle];
             let mesh = &scene.meshes[skybox.mesh_handle];
             self.set_pipeline(&material.pipeline);
@@ -208,8 +219,11 @@ impl<'a> DrawMesh for wgpu::RenderPass<'a> {
         //     );
         // }
 
-        world.query::<&ComputeRenderable>(|mut query| {
-            for renderable in query.iter() {
+        world.query::<(&ComputeRenderable, Option<&RenderLayer>)>(|mut query| {
+            for (renderable, layer) in query.iter() {
+                if !render_mask.includes(layer) {
+                    continue;
+                }
                 let rendering = &scene.compute_renderings[renderable.rendering_handle];
                 let mesh = &scene.meshes[renderable.mesh_handle];
                 self.set_pipeline(&rendering.pipeline);
@@ -256,6 +270,7 @@ pub trait DrawMesh {
         engine: &Engine,
         world: &World,
         view_bind_groups: &[Option<wgpu::BindGroup>],
+        render_mask: RenderMask,
     );
 }
 new_key_type! { pub struct MeshHandle; }

@@ -78,7 +78,7 @@ impl EguiRenderer {
         window: &Window,
         window_surface_view: &TextureView,
         screen_descriptor: ScreenDescriptor,
-        full_output: FullOutput,
+        mut full_output: FullOutput,
     ) {
         if !self.frame_started {
             panic!("begin_frame must be called before end_frame_and_draw can be called!");
@@ -93,9 +93,11 @@ impl EguiRenderer {
             .state
             .egui_ctx()
             .tessellate(full_output.shapes, self.state.egui_ctx().pixels_per_point());
-        for (id, image_delta) in &full_output.textures_delta.set {
-            self.renderer
-                .update_texture(&rc.device, &rc.queue, *id, image_delta.first().unwrap());
+        for (id, image_deltas) in full_output.textures_delta.set.drain() {
+            for image_delta in image_deltas {
+                self.renderer
+                    .update_texture(&rc.device, &rc.queue, id, &image_delta);
+            }
         }
         self.renderer
             .update_buffers(&rc.device, &rc.queue, encoder, &tris, &screen_descriptor);
@@ -118,8 +120,8 @@ impl EguiRenderer {
 
         self.renderer
             .render(&mut rpass.forget_lifetime(), &tris, &screen_descriptor);
-        for x in &full_output.textures_delta.free {
-            self.renderer.free_texture(x)
+        for id in full_output.textures_delta.free.drain() {
+            self.renderer.free_texture(&id)
         }
 
         self.frame_started = false;

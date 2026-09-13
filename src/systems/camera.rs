@@ -1,5 +1,5 @@
 use cgmath::{
-    EuclideanSpace, InnerSpace, Point3, Quaternion, Rad, Rotation, Rotation3, SquareMatrix,
+    EuclideanSpace, InnerSpace, Matrix, Point3, Quaternion, Rad, Rotation, Rotation3, SquareMatrix,
     Vector3, Vector4,
 };
 use indexmap::IndexMap;
@@ -132,6 +132,25 @@ pub enum CameraProjection {
     ScreenSpace,
 }
 
+/// World-space half-space: points with normal.dot(point) + distance >= 0 survive.
+/// For an oblique near plane the eye must be on the negative side.
+#[derive(Clone, Copy, Debug)]
+pub struct ClipPlane {
+    pub normal: Vector3<f32>,
+    pub distance: f32,
+}
+
+impl ClipPlane {
+    pub fn from_point_normal(point: Point3<f32>, normal: Vector3<f32>) -> Self {
+        assert!(normal.magnitude2() > 0.0 && normal.magnitude2().is_finite());
+        let normal = normal.normalize();
+        Self {
+            normal,
+            distance: -normal.dot(point.to_vec()),
+        }
+    }
+}
+
 impl Default for CameraProjection {
     fn default() -> Self {
         Self::Perspective
@@ -224,6 +243,9 @@ impl Camera {
         match self.projection {
             CameraProjection::ScreenSpace => return cgmath::Matrix4::identity(),
             CameraProjection::OrthographicWorld { .. } => {
+                if matches!(self.camera_mode, CameraMode::Fixed) {
+                    return cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+                }
                 return cgmath::Matrix4::look_at_rh(
                     self.eye,
                     self.eye + Vector3::unit_z(),
@@ -270,6 +292,44 @@ impl Camera {
                 1.0,
             ),
         }
+    }
+
+    /// OpenGL clip space first; callers apply OPENGL_TO_WGPU_MATRIX afterward.
+    fn projection_with_clip_plane(&self, plane: Option<ClipPlane>) -> cgmath::Matrix4<f32> {
+        let mut projection = self.build_projection_matrix();
+        let Some(plane) = plane else {
+            return projection;
+        };
+        if self.projection == CameraProjection::ScreenSpace {
+            return projection;
+        }
+        let Some(inverse_view) = self.build_view_matrix().invert() else {
+            return projection;
+        };
+        let plane = inverse_view.transpose() * plane.normal.extend(plane.distance);
+        let Some(inverse_projection) = projection.invert() else {
+            return projection;
+        };
+        // Lengyel's oblique projection: replace row 3 with c - row 4.
+        // https://terathon.com/blog/oblique-clipping.html
+        let corner = inverse_projection
+            * Vector4::new(
+                if plane.x >= 0.0 { 1.0 } else { -1.0 },
+                if plane.y >= 0.0 { 1.0 } else { -1.0 },
+                1.0,
+                1.0,
+            );
+        let denominator = plane.dot(corner);
+        // Degenerate/away-facing planes cannot define a usable near frustum.
+        if plane.w >= 0.0 || denominator <= 1.0e-6 || !denominator.is_finite() {
+            return projection;
+        }
+        let row = plane * (2.0 / denominator) - projection.row(3);
+        projection.x.z = row.x;
+        projection.y.z = row.y;
+        projection.z.z = row.z;
+        projection.w.z = row.w;
+        projection
     }
 
     pub fn resize(&mut self, screen_size: PhysicalSize<f32>) {
@@ -589,6 +649,7 @@ pub struct CameraUniform {
     proj: [[f32; 4]; 4],
     view: [[f32; 4]; 4],
     screen: [f32; 4],
+    viewport: [f32; 4],
 }
 
 impl CameraUniform {
@@ -599,6 +660,7 @@ impl CameraUniform {
 
             view: cgmath::Matrix4::identity().into(),
             screen: [0.0; 4],
+            viewport: [0.0; 4],
         }
     }
 
@@ -612,6 +674,30 @@ impl CameraUniform {
             display_to_render_ndc_scale,
             0.0,
         ];
+        self.viewport = [
+            camera.screen_size.width,
+            camera.screen_size.height,
+            0.0,
+            0.0,
+        ];
+    }
+
+    fn update_render_view(&mut self, view: &RenderView, rc: &RenderContext) {
+        self.update_view_proj(&view.camera, view_ndc_scale(view, rc));
+        if view.clip_plane.is_some() {
+            self.proj = (OPENGL_TO_WGPU_MATRIX
+                * view.camera.projection_with_clip_plane(view.clip_plane))
+            .into();
+        }
+        let size =
+            if view.render_target.is_window() && !rc.post_processing.post_processes.is_empty() {
+                crate::core::post_processing::PostProcessHandler::overscan_size(
+                    view.render_target.size(),
+                )
+            } else {
+                view.render_target.size()
+            };
+        self.viewport = [size.width as f32, size.height as f32, 0.0, 0.0];
     }
 }
 
@@ -648,7 +734,7 @@ impl CameraSystem {
         render_view_handle: RenderViewHandle,
     ) {
         let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&view.camera, view_ndc_scale(view, rc));
+        camera_uniform.update_render_view(view, rc);
         let camera_buffer = Buffer::new_init(
             &[camera_uniform],
             &rc.device,
@@ -670,9 +756,7 @@ impl CameraSystem {
         render_view_handle: &RenderViewHandle,
     ) {
         let buffer = self.cameras.get_mut(render_view_handle).unwrap();
-        buffer
-            .camera_uniform
-            .update_view_proj(&view.camera, view_ndc_scale(view, rc));
+        buffer.camera_uniform.update_render_view(view, rc);
         rc.queue.write_buffer(
             &buffer.camera_buffer.buffer,
             0,
@@ -725,12 +809,8 @@ impl ViewSystem for CameraSystem {
         view: &mut RenderView,
         rc: &mut RenderContext,
         render: RenderViewHandle,
-        dt: std::time::Duration,
+        _dt: std::time::Duration,
     ) {
-        view.camera.update_camera(dt);
-        if let Some(animator) = &mut view.camera_animator {
-            animator.update(dt.as_secs_f32(), &mut view.camera);
-        }
         self.update_camera(view, rc, &render);
     }
 
